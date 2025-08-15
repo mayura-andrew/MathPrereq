@@ -1,4 +1,5 @@
-# 🧮 Mathematics Learning Framework
+# 🧮 MathPrereq
+*LLM and Knowledge Graph Based Framework for Dynamic Prerequisite Knowledge Identification in Foundational Mathematics*
 
 An AI-powered mathematics tutoring system that provides personalized learning paths using knowledge graphs, semantic search, and large language models.
 
