@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+openai
+groq
+langchain
+chromadb
+pandas
+networkx
+sentence-transformers
+structlog
+tenacity
