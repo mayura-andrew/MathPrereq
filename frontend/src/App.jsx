@@ -8,6 +8,7 @@ import ExpertReviewDashboard from './components/ExpertReviewDashboard';
 import AutoGrowingKnowledgeGraph from './components/AutoGrowingKnowledgeGraph';
 import EducationalResources from './components/EducationalResources';
 import QueryWithResources from './components/QueryWithResources';
+import MarkdownDemo from './components/MarkdownDemo';
 import { mathAPI } from './services/api';
 import { 
   AcademicCapIcon, 
@@ -16,7 +17,8 @@ import {
   XCircleIcon,
   CogIcon,
   UserGroupIcon,
-  MagnifyingGlassIcon
+  MagnifyingGlassIcon,
+  DocumentTextIcon
 } from '@heroicons/react/24/outline';
 
 
@@ -32,7 +34,7 @@ function App() {
   // New state for Auto-Growing Knowledge Graph features
   const [showSubmissionForm, setShowSubmissionForm] = useState(false);
   const [userRole, setUserRole] = useState('student'); // 'student' or 'expert'
-  const [currentView, setCurrentView] = useState('smart_query'); // 'smart_query', 'learning' or 'admin'
+  const [currentView, setCurrentView] = useState('smart_query'); // 'demo', 'smart_query', 'learning' or 'admin'
 
   // Check system health on startup
   useEffect(() => {
@@ -185,6 +187,17 @@ function App() {
               {/* View Toggle */}
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={() => setCurrentView('demo')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'demo'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <DocumentTextIcon className="h-4 w-4 inline mr-2" />
+                  Markdown Demo
+                </button>
+                <button
                   onClick={() => setCurrentView('smart_query')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                     currentView === 'smart_query'
@@ -300,6 +313,9 @@ function App() {
         {currentView === 'admin' ? (
           // Knowledge Graph Admin View
           <AutoGrowingKnowledgeGraph />
+        ) : currentView === 'demo' ? (
+          // Markdown Rendering Demo
+          <MarkdownDemo />
         ) : currentView === 'smart_query' ? (
           // Smart Query with Automatic Resource Discovery
           <QueryWithResources />

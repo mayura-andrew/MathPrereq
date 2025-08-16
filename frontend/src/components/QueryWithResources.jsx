@@ -12,6 +12,7 @@ import {
 } from '@heroicons/react/24/outline';
 import VisualRoadmap from './VisualRoadmap';
 import EducationalResources from './EducationalResources';
+import TextualExplanation from './TextualExplanation';
 
 const QueryWithResources = () => {
   const [query, setQuery] = useState('');
@@ -273,34 +274,7 @@ const QueryWithResources = () => {
           {/* Tab Content */}
           <div className="p-6">
             {activeTab === 'explanation' && (
-              <div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">
-                  Answer to: "{response.query}"
-                </h3>
-                <div className="prose max-w-none">
-                  <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                    {response.explanation}
-                  </div>
-                </div>
-                
-                {response.identified_concepts.length > 0 && (
-                  <div className="mt-6">
-                    <h4 className="text-md font-medium text-gray-800 mb-2">
-                      Key Concepts Identified:
-                    </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {response.identified_concepts.map((concept, index) => (
-                        <span
-                          key={index}
-                          className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
-                        >
-                          {concept}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <TextualExplanation response={response} />
             )}
 
             {activeTab === 'roadmap' && (

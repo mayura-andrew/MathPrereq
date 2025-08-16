@@ -17,6 +17,95 @@
     border: 1px solid #d1d5db;
     border-radius: 6px;
   }
+
+/* Enhanced Markdown Styling */
+.markdown-content {
+  line-height: 1.7;
+}
+
+/* Mathematical Expressions */
+.markdown-content .katex {
+  font-size: 1.1em;
+}
+
+.markdown-content .katex-display {
+  margin: 1.5em 0;
+  text-align: center;
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+/* Code blocks */
+.markdown-content pre {
+  background: #1a202c !important;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.markdown-content code {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+}
+
+/* Inline code */
+.markdown-content :not(pre) > code {
+  background: #f1f5f9;
+  color: #dc2626;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-weight: 600;
+}
+
+/* Mathematical problem styling */
+.markdown-content blockquote {
+  border-left: 4px solid #3b82f6;
+  background: linear-gradient(to right, #eff6ff, #f8fafc);
+  margin: 1.5em 0;
+  padding: 1rem 1.5rem;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Enhanced list styling */
+.markdown-content ul, .markdown-content ol {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+
+.markdown-content li {
+  margin: 0.5rem 0;
+  line-height: 1.6;
+}
+
+/* Step-by-step solution highlighting */
+.markdown-content h4 {
+  color: #1e40af;
+  border-bottom: 2px solid #dbeafe;
+  padding-bottom: 0.25rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Table styling */
+.markdown-content table {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Problem flag emoji styling */
+.markdown-content h1:has-text("🚩"),
+.markdown-content h2:has-text("🚩"),
+.markdown-content h3:has-text("🚩") {
+  background: linear-gradient(135deg, #fee2e2, #fef3c7);
+  border: 1px solid #f87171;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin: 1rem 0;
+}
   
   button:hover {
     background: #f9fafb;

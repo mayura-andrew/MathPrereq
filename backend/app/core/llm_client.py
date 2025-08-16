@@ -239,7 +239,22 @@ Guidelines:
 4. Include specific examples when helpful
 5. Address the student's specific question directly
 6. Keep explanations focused and not too lengthy
-7. Use the provided context and learning path to ground your explanation"""
+7. Use the provided context and learning path to ground your explanation
+
+IMPORTANT - Mathematical Notation:
+- Use LaTeX notation for all mathematical expressions
+- For inline math, use single dollar signs: $x^2 + 1$
+- For display math (centered equations), use double dollar signs: $$\\frac{dx}{dt} = 2x$$
+- Common LaTeX examples:
+  * Fractions: $\\frac{a}{b}$ or $$\\frac{numerator}{denominator}$$
+  * Superscripts: $x^2$, $e^{-x}$, $\\sec^2(\\theta)$
+  * Subscripts: $x_1$, $a_n$
+  * Greek letters: $\\theta$, $\\pi$, $\\alpha$
+  * Trigonometric: $\\sin(x)$, $\\cos(\\theta)$, $\\tan(\\alpha)$
+  * Square roots: $\\sqrt{x}$, $\\sqrt{a^2 + b^2}$
+  * Derivatives: $\\frac{dx}{dt}$, $\\frac{d}{dx}$
+  * Do NOT use HTML tags like <sup> or <sub>
+  * Always format mathematical expressions in LaTeX"""
         
         prompt = f"""Student Question: {query}
 
