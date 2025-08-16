@@ -15,6 +15,7 @@ from data.vector_store import VectorStore
 
 from .api.submission_routes import router as submission_router
 
+from api.resource_routes import router as resource_router
 
 
 # Configure structured logging
@@ -97,6 +98,7 @@ app.add_middleware(
 app.include_router(router, prefix="/api/v1")
 app.include_router(concept_router, prefix="/api/v1")
 app.include_router(submission_router, prefix="/api/v1")
+app.include_router(resource_router, prefix="/api/v1", tags=["educational-resources"])
 
 @app.get("/")
 async def root():

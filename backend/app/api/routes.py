@@ -286,3 +286,70 @@ async def test_llm_providers(request: dict):
     except Exception as e:
         logger.error(f"❌ LLM testing failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/query-with-resources", response_model=QueryResponse)
+async def process_query_with_resources(
+    request: QueryRequest,
+    engine: OrchestrationEngine = Depends(get_orchestration_engine)
+):
+    """
+    Enhanced query processing that includes educational resource discovery
+    """
+    start_time = time.time()
+
+    try:
+        logger.info(f"🔍 Processing enhanced query: {request.question[:100]}...")
+        
+        # Use enhanced workflow with resources
+        workflow_result = await engine.process_query_workflow_with_resources(request.question)
+        
+        if not workflow_result["success"]:
+            return QueryResponse(
+                success=False,
+                query=request.question,
+                identified_concepts=[],
+                learning_path=LearningPath(concepts=[], total_concepts=0),
+                explanation=workflow_result.get("explanation", "Failed to process query"),
+                retrieved_context=[],
+                processing_time=time.time() - start_time,
+                error_message=workflow_result.get("error"),
+                educational_resources=[]
+            )
+        
+        # Format learning path for response
+        learning_path = LearningPath(
+            concepts=[ConceptInfo(**concept) for concept in workflow_result["prerequisite_path"]],
+            total_concepts=len(workflow_result["prerequisite_path"]),
+            path_type="prerequisite_path"
+        )
+
+        processing_time = time.time() - start_time
+
+        logger.info(f"✅ Enhanced query processed successfully in {processing_time:.2f}s")
+        
+        return QueryResponse(
+            success=True,
+            query=request.question,
+            identified_concepts=workflow_result["identified_concepts"],
+            learning_path=learning_path,
+            explanation=workflow_result["explanation"],
+            retrieved_context=workflow_result["retrieved_context"],
+            processing_time=processing_time,
+            educational_resources=workflow_result["educational_resources"]
+        )
+    
+    except Exception as e:
+        processing_time = time.time() - start_time
+        logger.error(f"❌ Enhanced query processing failed: {e}")
+        
+        return QueryResponse(
+            success=False,
+            query=request.question,
+            identified_concepts=[],
+            learning_path=LearningPath(concepts=[], total_concepts=0),
+            explanation="I apologize, but I encountered an error while processing your question. Please try again or rephrase your question.",
+            retrieved_context=[],
+            processing_time=processing_time,
+            error_message=str(e),
+            educational_resources=[]
+        )

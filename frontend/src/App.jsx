@@ -6,6 +6,8 @@ import LoadingSpinner from './components/LoadingSpinner';
 import ConceptSubmissionForm from './components/ConceptSubmissionForm';
 import ExpertReviewDashboard from './components/ExpertReviewDashboard';
 import AutoGrowingKnowledgeGraph from './components/AutoGrowingKnowledgeGraph';
+import EducationalResources from './components/EducationalResources';
+import QueryWithResources from './components/QueryWithResources';
 import { mathAPI } from './services/api';
 import { 
   AcademicCapIcon, 
@@ -13,8 +15,10 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   CogIcon,
-  UserGroupIcon
+  UserGroupIcon,
+  MagnifyingGlassIcon
 } from '@heroicons/react/24/outline';
+
 
 function App() {
   const [isLoading, setIsLoading] = useState(false);
@@ -22,11 +26,13 @@ function App() {
   const [error, setError] = useState(null);
   const [systemHealth, setSystemHealth] = useState(null);
   const [isHealthy, setIsHealthy] = useState(false);
-  
+  const [selectedConceptId, setSelectedConceptId] = useState(null);
+  const [selectedConceptName, setSelectedConceptName] = useState(null);
+
   // New state for Auto-Growing Knowledge Graph features
   const [showSubmissionForm, setShowSubmissionForm] = useState(false);
   const [userRole, setUserRole] = useState('student'); // 'student' or 'expert'
-  const [currentView, setCurrentView] = useState('learning'); // 'learning' or 'admin'
+  const [currentView, setCurrentView] = useState('smart_query'); // 'smart_query', 'learning' or 'admin'
 
   // Check system health on startup
   useEffect(() => {
@@ -179,6 +185,17 @@ function App() {
               {/* View Toggle */}
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={() => setCurrentView('smart_query')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'smart_query'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <MagnifyingGlassIcon className="h-4 w-4 inline mr-2" />
+                  Smart Query
+                </button>
+                <button
                   onClick={() => setCurrentView('learning')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                     currentView === 'learning'
@@ -283,6 +300,9 @@ function App() {
         {currentView === 'admin' ? (
           // Knowledge Graph Admin View
           <AutoGrowingKnowledgeGraph />
+        ) : currentView === 'smart_query' ? (
+          // Smart Query with Automatic Resource Discovery
+          <QueryWithResources />
         ) : (
           // Learning Interface View  
           <>
@@ -349,6 +369,31 @@ function App() {
         )}
           </>
         )}
+        <div className="mb-6">
+        <select 
+          onChange={(e) => {
+            const [id, name] = e.target.value.split('|');
+            setSelectedConceptId(id);
+            setSelectedConceptName(name);
+          }}
+          className="border border-gray-300 rounded-md px-3 py-2"
+        >
+          <option value="">Select a concept...</option>
+          <option value="derivatives|Derivatives">Derivatives</option>
+          <option value="integration|Integration">Integration</option>
+          <option value="limits|Limits">Limits</option>
+          <option value="chain_rule|Chain Rule">Chain Rule</option>
+          {/* Add more concepts from your knowledge graph */}
+        </select>
+      </div>
+
+{/* Educational Resources Component */}
+      {selectedConceptId && (
+        <EducationalResources 
+          conceptId={selectedConceptId} 
+          conceptName={selectedConceptName} 
+        />
+      )}
       </main>
 
       {/* Footer */}

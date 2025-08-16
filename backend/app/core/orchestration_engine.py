@@ -16,6 +16,8 @@ class OrchestrationEngine:
         self.knowledge_graph = knowledge_graph
         self.vector_store = vector_store
         self.llm_client = LLMClient()
+        self.web_scraper = None
+
 
     async def identify_concepts(self, query: str) -> List[str]:
         """Step 1: Use LLM to identify mathematical concepts from query"""
@@ -143,3 +145,129 @@ class OrchestrationEngine:
                     result["explanation"] = "I encountered an error while processing your question. Please try again."
             
             return result
+        
+    async def get_educational_resources(self, concepts: List[str]) -> List[Dict]:
+        """Get educational resources for identified concepts"""
+        try:
+            if not concepts:
+                return []
+            
+            logger.info(f"🔍 Fetching educational resources for {len(concepts)} concepts")
+            
+            # Check if resources already exist in storage
+            from data.resource_storage import ResourceStorage
+            storage = ResourceStorage()
+            
+            existing_resources = []
+            concepts_needing_scraping = []
+            
+            for concept in concepts:
+                # Check for existing resources
+                concept_id = self.knowledge_graph.find_concept_id(concept)
+                if concept_id:
+                    stored_resources = await storage.get_resources_for_concept(
+                        concept_id=concept_id,
+                        limit=5
+                    )
+                    
+                    if stored_resources and len(stored_resources) >= 3:
+                        existing_resources.extend(stored_resources)
+                    else:
+                        concepts_needing_scraping.append(concept)
+                else:
+                    concepts_needing_scraping.append(concept)
+            
+            # Scrape resources for concepts that need them
+            if concepts_needing_scraping:
+                logger.info(f"🕷️ Scraping resources for {len(concepts_needing_scraping)} concepts")
+                
+                from core.web_scraper import EducationalWebScraper
+                async with EducationalWebScraper(max_concurrent_requests=5) as scraper:
+                    new_resources = await scraper.scrape_resources_for_concepts(concepts_needing_scraping)
+                    
+                    # Store new resources
+                    if new_resources:
+                        await storage.store_resources(new_resources)
+                        
+                        # Convert to dict format for response
+                        new_resources_dict = [
+                            {
+                                'id': i,
+                                'concept_id': r.concept_id,
+                                'concept_name': r.concept_name,
+                                'title': r.title,
+                                'url': r.url,
+                                'description': r.description,
+                                'resource_type': r.resource_type,
+                                'source_domain': r.source_domain,
+                                'difficulty_level': r.difficulty_level,
+                                'quality_score': r.quality_score,
+                                'duration': r.duration,
+                                'thumbnail_url': r.thumbnail_url
+                            }
+                            for i, r in enumerate(new_resources)
+                        ]
+                        existing_resources.extend(new_resources_dict)
+            
+            logger.info(f"📚 Found {len(existing_resources)} total educational resources")
+            return existing_resources
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get educational resources: {e}")
+            return []
+
+    async def process_query_workflow_with_resources(self, query: str) -> Dict[str, Any]:
+        """Complete workflow including educational resource discovery"""
+        result = {
+            "success": False,
+            "query": query,
+            "identified_concepts": [],
+            "prerequisite_path": [],
+            "retrieved_context": [],
+            "explanation": "",
+            "educational_resources": [],
+            "error": None
+        }
+    
+        try:
+            # Phase 1: Concept Identification
+            logger.info("🔍 Phase 1: Identifying concepts...")
+            identified_concepts = await self.identify_concepts(query)
+            result["identified_concepts"] = identified_concepts
+                
+            if not identified_concepts:
+                result["explanation"] = "I couldn't identify any mathematical concepts in your question. Could you please rephrase it or be more specific?"
+                return result
+            
+            # Phase 2: Prerequisite Path Finding
+            logger.info("🗺️ Phase 2: Finding prerequisite path...")
+            prerequisite_path = self.find_prerequisite_path(identified_concepts)
+            result["prerequisite_path"] = prerequisite_path
+                
+            # Phase 3: Context Retrieval
+            logger.info("📚 Phase 3: Retrieving relevant context...")
+            retrieved_context = await self.retrieve_context(query)
+            result["retrieved_context"] = retrieved_context
+            
+            # Phase 4: Educational Resources Discovery
+            logger.info("🌐 Phase 4: Discovering educational resources...")
+            all_concepts = list(set(identified_concepts + [c['name'] for c in prerequisite_path]))
+            educational_resources = await self.get_educational_resources(all_concepts)
+            result["educational_resources"] = educational_resources
+            
+            # Phase 5: Explanation Generation
+            logger.info("🤖 Phase 5: Generating explanation...")
+            explanation = await self.generate_explanation(
+                query, prerequisite_path, retrieved_context
+            )
+            result["explanation"] = explanation
+                
+            result["success"] = True
+            logger.info("✅ Enhanced query workflow completed successfully")
+            
+        except Exception as e:
+                logger.error(f"❌ Enhanced query workflow failed: {e}")
+                result["error"] = str(e)
+                result["explanation"] = "I encountered an error while processing your question. Please try again."
+        
+        return result
