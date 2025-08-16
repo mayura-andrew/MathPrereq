@@ -77,6 +77,44 @@ export const mathAPI = {
     } catch (error) {
       throw new Error('Health check failed');
     }
+  },
+  async submitConcept(conceptData) {
+    try {
+      const response = await api.post('/submissions/submit-concept', conceptData);
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.detail || 'Failed to submit concept');
+    }
+  },
+  async getPendingSubmissions(reviewerId = null, status = 'pending_review', limit = 20) {
+    try {
+      const params = new URLSearchParams();
+      if (status) params.append('status', status);
+      if (limit) params.append('limit', limit.toString());
+      
+      const response = await api.get(`/concept-suggestions?${params.toString()}`);
+      return { submissions: response.data };
+    } catch (error) {
+      throw new Error(error.response?.data?.detail || 'Failed to get pending submissions');
+    }
+  },
+  async reviewSubmission(submissionId, reviewData) {
+    try {
+      const response = await api.post(`/expert-review/${submissionId}`, reviewData);
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.detail || 'Failed to review submission');
+    }
+  },
+
+  // Get submission statistics
+  async getSubmissionStatistics() {
+    try {
+      const response = await api.get('/knowledge-graph-stats');
+      return { statistics: response.data };
+    } catch (error) {
+      throw new Error(error.response?.data?.detail || 'Failed to get statistics');
+    }
   }
 };
   

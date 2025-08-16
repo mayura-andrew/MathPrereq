@@ -20,7 +20,40 @@ class OrchestrationEngine:
     async def identify_concepts(self, query: str) -> List[str]:
         """Step 1: Use LLM to identify mathematical concepts from query"""
         try:
-            return await self.llm_client.identify_concepts(query)
+            # Get concepts identified by LLM
+            identified_concepts = await self.llm_client.identify_concepts(query)
+            
+            # Check which concepts exist in knowledge graph vs missing
+            existing_concepts = []
+            missing_concepts = []
+            
+            for concept in identified_concepts:
+                concept_id = self.knowledge_graph.find_concept_id(concept)
+                if concept_id:
+                    existing_concepts.append(concept)
+                    logger.info(f"✅ Found concept in KG: {concept}")
+                else:
+                    missing_concepts.append(concept)
+                    logger.warning(f"⚠️ Concept not found in KG: {concept}")
+            
+            # Auto-generate suggestions for missing concepts
+            if missing_concepts:
+                logger.info(f"🤖 Auto-generating suggestions for {len(missing_concepts)} missing concepts")
+                
+                # Initialize concept analyzer if not exists
+                if not hasattr(self, 'concept_analyzer'):
+                    from .concept_analyzer import ConceptAnalyzer
+                    self.concept_analyzer = ConceptAnalyzer(self.llm_client, self.knowledge_graph)
+                
+                # Generate suggestions in background (don't wait for completion)
+                try:
+                    await self.concept_analyzer.handle_missing_concepts(missing_concepts, query)
+                except Exception as e:
+                    logger.error(f"❌ Failed to generate concept suggestions: {e}")
+            
+            # Return existing concepts for now (suggestions will be reviewed separately)
+            return existing_concepts
+            
         except Exception as e:
             logger.error(f"❌ Concept identification failed: {e}")
             return []

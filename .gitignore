@@ -38,6 +38,7 @@ venv.bak/
 .env.production.local
 backend/.env
 
+backend/data/raw/backup
 
 # IDE/Editor files
 .vscode/

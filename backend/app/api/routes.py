@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any, List
 import time
 import structlog
+from core.config import settings
+
+from core.llm_client import LLMClient
 from .models import (
     QueryRequest, QueryResponse, ConceptDetailRequest, 
     ConceptDetailResponse, HealthResponse, LearningPath, ConceptInfo
@@ -212,3 +215,74 @@ async def detailed_health_check(
             total_concepts=0,
             total_chunks=0
         )
+        
+@router.get("/llm-status")
+async def get_llm_status():
+    """Get status of all LLM providers"""
+    
+    try:
+        llm_client = LLMClient()
+        
+        status = {
+            "providers": llm_client.get_available_providers(),
+            "provider_status": llm_client.get_provider_status(),
+            "default_model": settings.default_llm_model  # Now this will work
+        }
+        
+        return {
+            "success": True,
+            "status": status
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get LLM status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/test-llm")
+async def test_llm_providers(request: dict):
+    """Test all available LLM providers"""
+    
+    try:
+        llm_client = LLMClient()
+        test_prompt = request.get("prompt", "What is 2+2? Answer in one sentence.")
+        
+        results = {}
+        
+        # Test each provider if available
+        providers = llm_client.get_available_providers()
+        
+        for provider in providers:
+            try:
+                if provider == "OpenAI" and llm_client.openai_client:
+                    response = await llm_client.call_llm(test_prompt, model="gpt-4o-mini")
+                    results[provider] = {"success": True, "response": response}
+                elif provider == "Groq" and llm_client.groq_client:
+                    # Temporarily disable other providers to test Groq
+                    temp_openai = llm_client.openai_client
+                    llm_client.openai_client = None
+                    response = await llm_client.call_llm(test_prompt)
+                    llm_client.openai_client = temp_openai
+                    results[provider] = {"success": True, "response": response}
+                elif provider == "Gemini" and llm_client.gemini_client:
+                    # Temporarily disable other providers to test Gemini
+                    temp_openai = llm_client.openai_client
+                    temp_groq = llm_client.groq_client
+                    llm_client.openai_client = None
+                    llm_client.groq_client = None
+                    response = await llm_client.call_llm(test_prompt)
+                    llm_client.openai_client = temp_openai
+                    llm_client.groq_client = temp_groq
+                    results[provider] = {"success": True, "response": response}
+                    
+            except Exception as e:
+                results[provider] = {"success": False, "error": str(e)}
+        
+        return {
+            "success": True,
+            "test_prompt": test_prompt,
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ LLM testing failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

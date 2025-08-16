@@ -8,6 +8,7 @@ networkx
 chromadb
 openai
 groq
+google-generativeai
 langchain
 langchain-community
 sentence-transformers

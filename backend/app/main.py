@@ -8,9 +8,14 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from api.routes import router
+from api.concept_routes import router as concept_router
 from core.config import settings
 from data.knowledge_graph import KnowledgeGraph
 from data.vector_store import VectorStore
+
+from .api.submission_routes import router as submission_router
+
+
 
 # Configure structured logging
 structlog.configure(
@@ -90,6 +95,8 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router, prefix="/api/v1")
+app.include_router(concept_router, prefix="/api/v1")
+app.include_router(submission_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

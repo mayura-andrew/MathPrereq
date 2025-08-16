@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: str = ""
     groq_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
     
     # Database Configuration
     chroma_persist_directory: str = "./data/chroma_db"

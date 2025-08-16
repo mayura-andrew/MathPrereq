@@ -1,5 +1,6 @@
 from openai import AsyncOpenAI
 import groq
+import google.generativeai as genai
 from typing import Dict, Any, Optional, List
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -11,6 +12,12 @@ class LLMClient:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
         self.groq_client = groq.Groq(api_key=settings.groq_api_key) if settings.groq_api_key else None
+        
+        if settings.gemini_api_key:
+            genai.configure(api_key=settings.gemini_api_key)
+            self.gemini_client = genai.GenerativeModel('gemini-2.0-flash')
+        else:
+            self.gemini_client = None
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def call_llm(
@@ -28,15 +35,13 @@ class LLMClient:
         max_tokens = max_tokens or settings.max_tokens
 
         messages = []
-
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        
         messages.append({"role": "user", "content": prompt})
 
         try:
             if self.openai_client and settings.openai_api_key:
-                logger.info(f"🤖 Calling OpenAI with model: {model}")
+                logger.info(f"🤖 Calling OpenAI {model}")
                 response = await self.openai_client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -46,13 +51,16 @@ class LLMClient:
                 return response.choices[0].message.content
             
             elif self.groq_client and settings.groq_api_key:
-                logger.info("🤖 Falling back to Groq")
-                groq_model = "llama3-8b-8192"  # or "mixtral-8x7b-32768" -> "llama3-70b-8192"
-                if "gpt-4" in model:
+                logger.info(f"🤖 Calling Groq - mapping model {model}")
+                
+                # Better model mapping for Groq
+                groq_model = "llama3-8b-8192"  # Default fast model
+                if "gpt-4" in model.lower() and "mini" not in model.lower():
                     groq_model = "llama3-70b-8192"  # Better model for complex tasks
-                elif "gpt-3.5" in model or "gpt-4o-mini" in model:
+                elif "gpt-3.5" in model.lower() or "mini" in model.lower() or "gpt-4o-mini" in model.lower():
                     groq_model = "llama3-8b-8192"   # Faster model
                 
+                logger.info(f"🤖 Using Groq model: {groq_model}")
                 response = self.groq_client.chat.completions.create(
                     model=groq_model,
                     messages=messages,
@@ -60,11 +68,119 @@ class LLMClient:
                     max_tokens=max_tokens
                 )
                 return response.choices[0].message.content
+            
+            elif self.gemini_client and settings.gemini_api_key:
+                logger.info(f"🤖 Calling Google Gemini")
+                
+                # Prepare prompt for Gemini (combine system and user prompts)
+                full_prompt = prompt
+                if system_prompt:
+                    full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
+                
+                # Configure generation parameters
+                generation_config = genai.types.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                    candidate_count=1,
+                )
+                # Generate response
+                response = await self.gemini_client.generate_content_async(
+                    full_prompt,
+                    generation_config=generation_config
+                )
+                
+                logger.info(f"✅ Gemini response received")
+                return response.text
+            
             else:
-                raise Exception("No LLM API keys configured")
+                raise Exception("No LLM client available. Please configure OpenAI, Groq, or Gemini API keys.")
+            
+            
+                
         except Exception as e:
             logger.error(f"❌ LLM call failed: {e}")
+            # Try fallback to next available client
+            if "OpenAI" in str(e) and (self.groq_client or self.gemini_client):
+                logger.info("🔄 OpenAI failed, trying fallback...")
+                return await self._fallback_llm_call(prompt, system_prompt, temperature, max_tokens)
+            elif "Groq" in str(e) and self.gemini_client:
+                logger.info("🔄 Groq failed, trying Gemini fallback...")
+                return await self._fallback_llm_call(prompt, system_prompt, temperature, max_tokens)
             raise
+    
+    async def _fallback_llm_call(
+        self, 
+        prompt: str, 
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """Fallback LLM call when primary provider fails"""
+        
+        temperature = temperature if temperature is not None else settings.temperature
+        max_tokens = max_tokens or settings.max_tokens
+        
+        try:
+            # Try Groq as fallback
+            if self.groq_client and settings.groq_api_key:
+                logger.info("🔄 Fallback to Groq")
+                
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                response = self.groq_client.chat.completions.create(
+                    model="llama3-8b-8192",
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                return response.choices[0].message.content
+             
+            # Try Gemini as fallback
+            elif self.gemini_client and settings.gemini_api_key:
+                logger.info("🔄 Fallback to Gemini")
+                
+                full_prompt = prompt
+                if system_prompt:
+                    full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
+                
+                generation_config = genai.types.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                    candidate_count=1,
+                )
+                
+                response = await self.gemini_client.generate_content_async(
+                    full_prompt,
+                    generation_config=generation_config
+                )
+                return response.text
+            
+            else:
+                raise Exception("No fallback LLM client available")
+                
+        except Exception as e:
+            logger.error(f"❌ Fallback LLM call failed: {e}")
+            raise
+
+    async def generate_response(
+        self, 
+        prompt: str, 
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None
+    ) -> str:
+        """Alias for call_llm to maintain compatibility"""
+        return await self.call_llm(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
 
     async def identify_concepts(self, query: str) -> List[str]:
         """Extract mathematical concepts from user query"""
@@ -338,3 +454,27 @@ Separate each problem with "---" """
         except Exception as e:
             logger.error(f"❌ Failed to generate practice problems: {e}")
             return []
+        
+    
+    def get_available_providers(self) -> List[str]:
+        """Get list of available LLM providers"""
+        providers = []
+        
+        if self.openai_client and settings.openai_api_key:
+            providers.append("OpenAI")
+        
+        if self.groq_client and settings.groq_api_key:
+            providers.append("Groq")
+        
+        if self.gemini_client and settings.gemini_api_key:
+            providers.append("Gemini")
+        
+        return providers
+    
+    def get_provider_status(self) -> Dict[str, bool]:
+        """Get status of all LLM providers"""
+        return {
+            "openai": bool(self.openai_client and settings.openai_api_key),
+            "groq": bool(self.groq_client and settings.groq_api_key),
+            "gemini": bool(self.gemini_client and settings.gemini_api_key)
+        }

@@ -1,0 +1,8 @@
+source_id,target_id,relationship_type
+func_basics,limits,prerequisite_for
+limits,continuity,prerequisite_for
+limits,derivatives,prerequisite_for
+derivatives,chain_rule,prerequisite_for
+derivatives,integration,prerequisite_for
+integration,substitution,prerequisite_for
+integration,parts,prerequisite_for
