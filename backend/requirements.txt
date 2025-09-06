@@ -21,3 +21,6 @@ pytest-asyncio
 structlog
 tenacity
 sqlalchemy
+beautifulsoup4
+aiohttp
+lxml

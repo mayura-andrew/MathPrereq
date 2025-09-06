@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  neo4j:
+    extends:
+      file: docker-compose.yml
+      service: neo4j
+    environment:
+      NEO4J_AUTH: neo4j/password123
+      NEO4J_dbms_connector_bolt_listen__address: 0.0.0.0:7687
+      NEO4J_dbms_connector_http_listen__address: 0.0.0.0:7474
+
+  weaviate:
+    extends:
+      file: docker-compose.yml
+      service: weaviate
+
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+
+  # Development API with hot reload
+  api-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: math-learning-api-dev
+    environment:
+      MLF_SERVER_HOST: "0.0.0.0"
+      MLF_SERVER_PORT: 8000
+      MLF_NEO4J_URI: "bolt://neo4j:7687"
+      MLF_NEO4J_USERNAME: "neo4j"
+      MLF_NEO4J_PASSWORD: "password123"
+      MLF_WEAVIATE_HOST: "weaviate:8080"
+      MLF_WEAVIATE_SCHEME: "http"
+      MLF_LLM_API_KEY: ${GOOGLE_API_KEY:-}
+      MLF_LLM_PROVIDER: "gemini"          
+      MLF_LLM_MODEL: "gemini-2.5-pro"
+      MLF_LLM_MAX_TOKENS: 8192 
+      MLF_LOGGING_LEVEL: "debug"
+    ports:
+      - "8000:8000"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    networks:
+      - math-learning

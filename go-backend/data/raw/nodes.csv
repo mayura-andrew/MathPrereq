@@ -1,0 +1,36 @@
+node_id,concept_name,description
+func_basics,Basic Functions,Understanding of function notation domain and range
+limits,Limits,The concept of approaching a value infinitely close
+continuity,Continuity,Functions without breaks jumps or holes
+derivatives,Derivatives,Rate of change and slope of tangent lines
+chain_rule,Chain Rule,Derivative of composite functions
+integration,Integration,Finding antiderivatives and area under curves
+substitution,U-Substitution,Integration technique using substitution
+parts,Integration by Parts,Integration technique for products of functions
+implicit_differentiation,Implicit Differentiation,"A technique used to find the derivative of an implicitly defined function, applying the chain rule and product rule to differentiate both sides of the equation with respect to x."
+product_quotient_rules,Product and Quotient Rules,"The Product Rule and Quotient Rule are essential derivatives rules for multiplying or dividing two functions, often combining with the Chain Rule."
+product_rule,Product Rule,"Rule for differentiating products of two functions: (f·g)' = f'·g + f·g'"
+quotient_rule,Quotient Rule,"Rule for differentiating quotients of two functions: (f/g)' = (f'·g - f·g')/g²"
+power_rule,Power Rule,"Rule for differentiating power functions: d/dx[x^n] = n·x^(n-1)"
+trigonometric_functions,Trigonometric Functions,"Functions based on angles: sin(x), cos(x), tan(x) and their properties"
+trigonometric_derivatives,Trigonometric Derivatives,"Derivatives of trigonometric functions: d/dx[sin(x)] = cos(x), d/dx[cos(x)] = -sin(x)"
+exponential_functions,Exponential Functions,"Functions of the form f(x) = a^x or f(x) = e^x"
+logarithmic_functions,Logarithmic Functions,"Inverse functions of exponentials: ln(x), log(x)"
+related_rates,Related Rates,"Problems involving rates of change of related quantities over time"
+optimization,Optimization,"Finding maximum and minimum values of functions"
+critical_points,Critical Points,"Points where the derivative equals zero or is undefined"
+second_derivative_test,Second Derivative Test,"Using the second derivative to classify critical points"
+curve_sketching,Curve Sketching,"Analyzing and graphing functions using calculus techniques"
+fundamental_theorem,Fundamental Theorem of Calculus,"The connection between differentiation and integration"
+definite_integrals,Definite Integrals,"Integration over a specific interval with numerical result"
+indefinite_integrals,Indefinite Integrals,"Integration without bounds resulting in a family of functions"
+area_between_curves,Area Between Curves,"Finding area between two or more curves using integration"
+volume_revolution,Volume of Revolution,"Finding volumes of solids formed by rotating curves"
+parametric_equations,Parametric Equations,"Equations where x and y are both functions of a parameter t"
+polar_coordinates,Polar Coordinates,"Coordinate system using radius and angle (r,θ)"
+sequences_series,Sequences and Series,"Ordered lists of numbers and their sums"
+convergence_tests,Convergence Tests,"Methods to determine if infinite series converge"
+taylor_series,Taylor Series,"Infinite polynomial representations of functions"
+partial_derivatives,Partial Derivatives,"Derivatives of multivariable functions with respect to one variable"
+multiple_integrals,Multiple Integrals,"Integration over regions in two or more dimensions"
+vector_calculus,Vector Calculus,"Calculus applied to vector fields and vector functions"

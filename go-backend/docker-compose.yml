@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # Neo4j Knowledge Graph
+  neo4j:
+    image: neo4j:5.15
+    container_name: math-learning-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/password123
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+      NEO4J_dbms_memory_heap_initial__size: 512M
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache_size: 256M
+    ports:
+      - "7474:7474"   # HTTP
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password123 'RETURN 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - math-learning
+
+  # Weaviate Vector Database
+  weaviate:
+    image: semitechnologies/weaviate:1.22.4
+    container_name: math-learning-weaviate
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      DEFAULT_VECTORIZER_MODULE: 'text2vec-google'
+      ENABLE_MODULES: 'text2vec-google,generative-google'
+      OPENAI_APIKEY: ${GOOGLE_API_KEY:-}
+      CLUSTER_HOSTNAME: 'node1'
+    ports:
+      - "8080:8080"
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - math-learning
+
+  # Redis Cache (optional for production)
+  redis:
+    image: redis:7-alpine
+    container_name: math-learning-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - math-learning
+
+  # Go API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: math-learning-api
+    environment:
+      MLF_SERVER_HOST: "0.0.0.0"
+      MLF_SERVER_PORT: 8000
+      MLF_NEO4J_URI: "bolt://neo4j:7687"
+      MLF_NEO4J_USERNAME: "neo4j"
+      MLF_NEO4J_PASSWORD: "password123"
+      MLF_WEAVIATE_HOST: "weaviate:8080"
+      MLF_WEAVIATE_SCHEME: "http"
+      MLF_LLM_API_KEY: ${GOOGLE_API_KEY:-}
+      MLF_LLM_PROVIDER: "gemini"
+      MLF_LLM_MODEL: "gemini-2.5-pro"
+    ports:
+      - "8000:8000"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    networks:
+      - math-learning
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
+  weaviate_data:
+  redis_data:
+
+networks:
+  math-learning:
+    driver: bridge
