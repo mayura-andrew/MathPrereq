@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
+from datetime import datetime
+from enum import Enum
 
 class QueryRequest(BaseModel):
     question: str = Field(..., description="Student's mathematical question")
@@ -44,3 +46,63 @@ class HealthResponse(BaseModel):
     vector_store_loaded: bool
     total_concepts: int
     total_chunks: int
+    
+class SubmissionStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    NEEDS_REVISION = "needs_revision"
+
+class ConceptSubmissionRequest(BaseModel):
+    student_id: Optional[str] = Field(None, description="Student identifier (optional)")
+    student_name: Optional[str] = Field(None, description="Student name (optional)")
+    title: str = Field(..., description="Concept title")
+    description: str = Field(..., description="Detailed concept description")
+    source_material: Optional[str] = Field(None, description="Source reference")
+
+class ConceptSubmissionResponse(BaseModel):
+    success: bool
+    submission_id: Optional[int] = None
+    message: str
+    suggested_concept_name: Optional[str] = None
+    confidence_score: Optional[int] = None
+    estimated_review_time: Optional[str] = None
+    feedback: Optional[str] = None
+    suggestions: List[str] = []
+
+class SubmissionListResponse(BaseModel):
+    success: bool
+    submissions: List[Dict[str, Any]]
+    total_count: int
+    pending_count: int
+
+class ReviewSubmissionRequest(BaseModel):
+    reviewer_id: str = Field(..., description="Reviewer identifier")
+    decision: str = Field(..., description="approve/reject/needs_revision")
+    comments: str = Field(..., description="Review comments")
+    modifications: Optional[Dict[str, Any]] = Field(None, description="Suggested modifications")
+    
+class EducationalResourceInfo(BaseModel):
+    id: int
+    concept_id: str
+    concept_name: str
+    title: str
+    url: str
+    description: str
+    resource_type: str  # 'video', 'article', 'tutorial', 'example', 'practice'
+    source_domain: str
+    difficulty_level: str
+    quality_score: float
+    duration: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+
+class QueryResponse(BaseModel):
+    success: bool
+    query: str
+    identified_concepts: List[str]
+    learning_path: LearningPath
+    explanation: str
+    retrieved_context: List[str]
+    processing_time: float
+    error_message: Optional[str] = None
+    educational_resources: List[EducationalResourceInfo] = []  # Add this field

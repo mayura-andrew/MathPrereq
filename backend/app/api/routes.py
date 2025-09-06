@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any, List
 import time
 import structlog
+from core.config import settings
+
+from core.llm_client import LLMClient
 from .models import (
     QueryRequest, QueryResponse, ConceptDetailRequest, 
     ConceptDetailResponse, HealthResponse, LearningPath, ConceptInfo
@@ -211,4 +214,142 @@ async def detailed_health_check(
             vector_store_loaded=False,
             total_concepts=0,
             total_chunks=0
+        )
+        
+@router.get("/llm-status")
+async def get_llm_status():
+    """Get status of all LLM providers"""
+    
+    try:
+        llm_client = LLMClient()
+        
+        status = {
+            "providers": llm_client.get_available_providers(),
+            "provider_status": llm_client.get_provider_status(),
+            "default_model": settings.default_llm_model  # Now this will work
+        }
+        
+        return {
+            "success": True,
+            "status": status
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get LLM status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/test-llm")
+async def test_llm_providers(request: dict):
+    """Test all available LLM providers"""
+    
+    try:
+        llm_client = LLMClient()
+        test_prompt = request.get("prompt", "What is 2+2? Answer in one sentence.")
+        
+        results = {}
+        
+        # Test each provider if available
+        providers = llm_client.get_available_providers()
+        
+        for provider in providers:
+            try:
+                if provider == "OpenAI" and llm_client.openai_client:
+                    response = await llm_client.call_llm(test_prompt, model="gpt-4o-mini")
+                    results[provider] = {"success": True, "response": response}
+                elif provider == "Groq" and llm_client.groq_client:
+                    # Temporarily disable other providers to test Groq
+                    temp_openai = llm_client.openai_client
+                    llm_client.openai_client = None
+                    response = await llm_client.call_llm(test_prompt)
+                    llm_client.openai_client = temp_openai
+                    results[provider] = {"success": True, "response": response}
+                elif provider == "Gemini" and llm_client.gemini_client:
+                    # Temporarily disable other providers to test Gemini
+                    temp_openai = llm_client.openai_client
+                    temp_groq = llm_client.groq_client
+                    llm_client.openai_client = None
+                    llm_client.groq_client = None
+                    response = await llm_client.call_llm(test_prompt)
+                    llm_client.openai_client = temp_openai
+                    llm_client.groq_client = temp_groq
+                    results[provider] = {"success": True, "response": response}
+                    
+            except Exception as e:
+                results[provider] = {"success": False, "error": str(e)}
+        
+        return {
+            "success": True,
+            "test_prompt": test_prompt,
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ LLM testing failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/query-with-resources", response_model=QueryResponse)
+async def process_query_with_resources(
+    request: QueryRequest,
+    engine: OrchestrationEngine = Depends(get_orchestration_engine)
+):
+    """
+    Enhanced query processing that includes educational resource discovery
+    """
+    start_time = time.time()
+
+    try:
+        logger.info(f"🔍 Processing enhanced query: {request.question[:100]}...")
+        
+        # Use enhanced workflow with resources
+        workflow_result = await engine.process_query_workflow_with_resources(request.question)
+        
+        if not workflow_result["success"]:
+            return QueryResponse(
+                success=False,
+                query=request.question,
+                identified_concepts=[],
+                learning_path=LearningPath(concepts=[], total_concepts=0),
+                explanation=workflow_result.get("explanation", "Failed to process query"),
+                retrieved_context=[],
+                processing_time=time.time() - start_time,
+                error_message=workflow_result.get("error"),
+                educational_resources=[]
+            )
+        
+        # Format learning path for response
+        learning_path = LearningPath(
+            concepts=[ConceptInfo(**concept) for concept in workflow_result["prerequisite_path"]],
+            total_concepts=len(workflow_result["prerequisite_path"]),
+            path_type="prerequisite_path"
+        )
+
+        processing_time = time.time() - start_time
+
+        logger.info(f"✅ Enhanced query processed successfully in {processing_time:.2f}s")
+        
+        return QueryResponse(
+            success=True,
+            query=request.question,
+            identified_concepts=workflow_result["identified_concepts"],
+            learning_path=learning_path,
+            explanation=workflow_result["explanation"],
+            retrieved_context=workflow_result["retrieved_context"],
+            processing_time=processing_time,
+            educational_resources=workflow_result["educational_resources"]
+        )
+    
+    except Exception as e:
+        processing_time = time.time() - start_time
+        logger.error(f"❌ Enhanced query processing failed: {e}")
+        
+        return QueryResponse(
+            success=False,
+            query=request.question,
+            identified_concepts=[],
+            learning_path=LearningPath(concepts=[], total_concepts=0),
+            explanation="I apologize, but I encountered an error while processing your question. Please try again or rephrase your question.",
+            retrieved_context=[],
+            processing_time=processing_time,
+            error_message=str(e),
+            educational_resources=[]
         )

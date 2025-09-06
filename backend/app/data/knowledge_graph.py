@@ -148,4 +148,33 @@ class KnowledgeGraph:
                 'description': node_data.get('description', '')
             })
         return concepts
+    
+    def reload_from_csv(self):
+        """Reload knowledge graph from CSV files (for after integration)"""
+        try:
+            # Clear existing graph
+            self.graph.clear()
+            self.concept_mapping.clear()
+            
+            # Reload from CSV files
+            nodes_file = self.nodes_file if hasattr(self, 'nodes_file') else "data/raw/nodes.csv"
+            edges_file = self.edges_file if hasattr(self, 'edges_file') else "data/raw/edges.csv"
+            
+            self.load_from_csv(nodes_file, edges_file)
+            logger.info(f"🔄 Reloaded KG: {len(self.graph.nodes)} nodes, {len(self.graph.edges)} edges")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to reload knowledge graph: {e}")
+            raise
+        
+    
+    def __init__(self, node_file: str, edges_file: str):
+        # Store file paths for reloading
+        self.nodes_file = node_file
+        self.edges_file = edges_file
+        
+        self.graph = nx.DiGraph()
+        self.concept_mapping = {}
+        self.load_from_csv(node_file, edges_file)
+    
 

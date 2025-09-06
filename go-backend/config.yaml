@@ -1,0 +1,32 @@
+server:
+  host: localhost
+  port: 8000
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+  read_timeout: 30
+  write_timeout: 30
+  max_header_bytes: 1048576
+
+neo4j:
+  uri: "bolt://localhost:7687"
+  username: "neo4j"
+  password: "password123"
+  database: "neo4j"
+
+weaviate:
+  host: "localhost:8080"
+  scheme: "http"
+  class: "CalculusContent"
+
+llm:
+  provider: "openai"
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o-mini"
+  temperature: 0.1
+  max_tokens: 2000
+  retry_attempts: 3
+
+logging:
+  level: "info"
+  format: "json"

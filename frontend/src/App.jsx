@@ -3,13 +3,24 @@ import QueryInput from './components/QueryInput';
 import TextualExplanation from './components/TextualExplanation';
 import VisualRoadmap from './components/VisualRoadmap';
 import LoadingSpinner from './components/LoadingSpinner';
+import ConceptSubmissionForm from './components/ConceptSubmissionForm';
+import ExpertReviewDashboard from './components/ExpertReviewDashboard';
+import AutoGrowingKnowledgeGraph from './components/AutoGrowingKnowledgeGraph';
+import EducationalResources from './components/EducationalResources';
+import QueryWithResources from './components/QueryWithResources';
+import MarkdownDemo from './components/MarkdownDemo';
 import { mathAPI } from './services/api';
 import { 
   AcademicCapIcon, 
   ExclamationTriangleIcon,
   CheckCircleIcon,
-  XCircleIcon 
+  XCircleIcon,
+  CogIcon,
+  UserGroupIcon,
+  MagnifyingGlassIcon,
+  DocumentTextIcon
 } from '@heroicons/react/24/outline';
+
 
 function App() {
   const [isLoading, setIsLoading] = useState(false);
@@ -17,6 +28,13 @@ function App() {
   const [error, setError] = useState(null);
   const [systemHealth, setSystemHealth] = useState(null);
   const [isHealthy, setIsHealthy] = useState(false);
+  const [selectedConceptId, setSelectedConceptId] = useState(null);
+  const [selectedConceptName, setSelectedConceptName] = useState(null);
+
+  // New state for Auto-Growing Knowledge Graph features
+  const [showSubmissionForm, setShowSubmissionForm] = useState(false);
+  const [userRole, setUserRole] = useState('student'); // 'student' or 'expert'
+  const [currentView, setCurrentView] = useState('smart_query'); // 'demo', 'smart_query', 'learning' or 'admin'
 
   // Check system health on startup
   useEffect(() => {
@@ -151,15 +169,93 @@ function App() {
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center">
-            <AcademicCapIcon className="h-8 w-8 text-blue-600 mr-3" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Mathematics Learning Framework
-              </h1>
-              <p className="text-gray-600 text-sm">
-                AI-powered prerequisite knowledge identification for calculus
-              </p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <AcademicCapIcon className="h-8 w-8 text-blue-600 mr-3" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  Mathematics Learning Framework
+                </h1>
+                <p className="text-gray-600 text-sm">
+                  AI-powered prerequisite knowledge identification for calculus
+                </p>
+              </div>
+            </div>
+            
+            {/* View Toggle & Role Selection */}
+            <div className="flex items-center space-x-4">
+              {/* View Toggle */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setCurrentView('demo')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'demo'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <DocumentTextIcon className="h-4 w-4 inline mr-2" />
+                  Markdown Demo
+                </button>
+                <button
+                  onClick={() => setCurrentView('smart_query')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'smart_query'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <MagnifyingGlassIcon className="h-4 w-4 inline mr-2" />
+                  Smart Query
+                </button>
+                <button
+                  onClick={() => setCurrentView('learning')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'learning'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <AcademicCapIcon className="h-4 w-4 inline mr-2" />
+                  Learning
+                </button>
+                <button
+                  onClick={() => setCurrentView('admin')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'admin'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <CogIcon className="h-4 w-4 inline mr-2" />
+                  Knowledge Graph Admin
+                </button>
+              </div>
+              
+              {/* Role Toggle */}
+              {currentView === 'learning' && (
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium text-gray-700">Role:</label>
+                  <select
+                    value={userRole}
+                    onChange={(e) => setUserRole(e.target.value)}
+                    className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+                  >
+                    <option value="student">Student</option>
+                    <option value="expert">Expert</option>
+                  </select>
+                </div>
+              )}
+              
+              {/* Action Button */}
+              {currentView === 'learning' && (
+                <button
+                  onClick={() => setShowSubmissionForm(!showSubmissionForm)}
+                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm"
+                >
+                  {showSubmissionForm ? 'Cancel' : 'Contribute Knowledge'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -195,17 +291,50 @@ function App() {
           </div>
         )}
 
-        {/* Query Input */}
-        <QueryInput 
-          onSubmit={handleQuerySubmit}
-          isLoading={isLoading}
-        />
+        {/* Auto-Growing Knowledge Graph Features */}
+        {showSubmissionForm && currentView === 'learning' && (
+          <div className="mb-6">
+            <ConceptSubmissionForm 
+              onSubmissionSuccess={(response) => {
+                console.log('Submission successful:', response);
+                setShowSubmissionForm(false);
+              }}
+            />
+          </div>
+        )}
+
+        {userRole === 'expert' && !showSubmissionForm && currentView === 'learning' && (
+          <div className="mb-6">
+            <ExpertReviewDashboard reviewerId="expert_123" />
+          </div>
+        )}
+
+        {/* View-specific Content */}
+        {currentView === 'admin' ? (
+          // Knowledge Graph Admin View
+          <AutoGrowingKnowledgeGraph />
+        ) : currentView === 'demo' ? (
+          // Markdown Rendering Demo
+          <MarkdownDemo />
+        ) : currentView === 'smart_query' ? (
+          // Smart Query with Automatic Resource Discovery
+          <QueryWithResources />
+        ) : (
+          // Learning Interface View  
+          <>
+            {/* Query Input - Only show when not in submission mode */}
+            {!showSubmissionForm && (
+              <QueryInput 
+                onSubmit={handleQuerySubmit}
+                isLoading={isLoading}
+              />
+            )}
 
         {/* Loading State */}
         {isLoading && <LoadingSpinner />}
 
         {/* Results */}
-        {!isLoading && currentResponse && (
+        {!isLoading && currentResponse && !showSubmissionForm && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Left Column: Textual Explanation */}
             <div className="lg:col-span-1">
@@ -224,7 +353,7 @@ function App() {
         )}
 
         {/* Welcome Message - Show when no response yet */}
-        {!isLoading && !currentResponse && (
+        {!isLoading && !currentResponse && !showSubmissionForm && userRole === 'student' && (
           <div className="bg-white rounded-lg shadow-md p-8 text-center">
             <AcademicCapIcon className="h-16 w-16 mx-auto text-blue-600 mb-4" />
             <h2 className="text-xl font-semibold text-gray-800 mb-2">
@@ -254,15 +383,45 @@ function App() {
             </div>
           </div>
         )}
+          </>
+        )}
+        <div className="mb-6">
+        <select 
+          onChange={(e) => {
+            const [id, name] = e.target.value.split('|');
+            setSelectedConceptId(id);
+            setSelectedConceptName(name);
+          }}
+          className="border border-gray-300 rounded-md px-3 py-2"
+        >
+          <option value="">Select a concept...</option>
+          <option value="derivatives|Derivatives">Derivatives</option>
+          <option value="integration|Integration">Integration</option>
+          <option value="limits|Limits">Limits</option>
+          <option value="chain_rule|Chain Rule">Chain Rule</option>
+          {/* Add more concepts from your knowledge graph */}
+        </select>
+      </div>
+
+{/* Educational Resources Component */}
+      {selectedConceptId && (
+        <EducationalResources 
+          conceptId={selectedConceptId} 
+          conceptName={selectedConceptName} 
+        />
+      )}
       </main>
 
       {/* Footer */}
       <footer className="bg-white border-t mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="text-center text-sm text-gray-500">
-            <p>Mathematics Learning Framework v0.1.0 - Research Prototype</p>
+            <p>Mathematics Learning Framework v0.2.0 - Research Prototype</p>
             <p className="mt-1">
               Powered by LLM + Knowledge Graph + RAG Architecture
+            </p>
+            <p className="mt-1 text-xs">
+              🌱 Auto-Growing Knowledge Graph • Human-AI Collaboration
             </p>
           </div>
         </div>

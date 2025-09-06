@@ -14,9 +14,15 @@
     "@heroicons/react": "^2.0.18",
     "axios": "^1.6.2",
     "clsx": "^2.0.0",
+    "prismjs": "^1.30.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "reactflow": "^11.11.4"
+    "react-markdown": "^10.1.0",
+    "reactflow": "^11.11.4",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",
