@@ -4,7 +4,7 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // 30 seconds for complex queries
+  timeout: 120000, // 30 seconds for complex queries
   headers: {
     'Content-Type': 'application/json',
   },
@@ -41,6 +41,8 @@ export const mathAPI = {
       const response = await api.post('/query', {
         question,
         context
+      }, {
+        timeout: 120000
       });
       return response.data;
     } catch (error) {

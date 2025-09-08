@@ -1,4 +1,4 @@
-.PHONY: help build run test clean dev-up dev-down migrate
+.PHONY: help build run test clean dev-up dev-down migrate migrate-clean services-up services-down
 
 DOCKER_COMPOSE_DEV = docker-compose -f docker-compose.yml -f docker-compose.dev.yml
 DOCKER_COMPOSE = docker-compose
@@ -42,10 +42,22 @@ prod-down: ## Stop production environment
 	@echo "🛑 Stopping production environment..."
 	$(DOCKER_COMPOSE) down
 
-migrate: ## Run database migrations
+migrate: services-up ## Run database migrations
 	@echo "📊 Running Neo4j and Weaviate migration..."
 	go run ./cmd/migrate/*.go
 	@echo "✅ Migrations completed"
+
+migrate-clean: services-down ## Clean all data and run fresh migration
+	docker-compose down -v  # Remove volumes
+	$(MAKE) migrate
+
+services-up: ## Start all services
+	docker-compose up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 10
+
+services-down: ## Stop all services  
+	docker-compose down
 
 logs: ## Show logs from all services
 	$(DOCKER_COMPOSE_DEV) logs -f

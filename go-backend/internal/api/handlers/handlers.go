@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -30,11 +31,14 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 	var req models.QueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Warn("Invalid request", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   err.Error(),
+			"success": false,
+		})
 		return
 	}
 
-	h.logger.Info("Processing query", zap.String("question", req.Question[:min(len(req.Question), 100)]))
+	h.logger.Info("Processing query", zap.String("query", req.Question[:min(len(req.Question), 100)]))
 
 	result, err := h.orchestrator.ProcessQuery(c.Request.Context(), req.Question)
 	processingTime := time.Since(start)
@@ -52,7 +56,9 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 			ProcessingTime:     processingTime,
 			ErrorMessage:       &errorMsg,
 		}
-		c.JSON(http.StatusOK, response)
+
+		h.logger.Info("Returning error response", zap.Any("response", response))
+		c.JSON(http.StatusOK, response) // Keep 200 status for frontend compatibility
 		return
 	}
 
@@ -81,7 +87,24 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 		ProcessingTime:   processingTime,
 	}
 
-	h.logger.Info("Query processed successfully", zap.Duration("processing_time", processingTime))
+	h.logger.Info("Query processed successfully",
+		zap.Duration("processing_time", processingTime),
+		zap.Int("concepts", len(result.IdentifiedConcepts)),
+		zap.Int("path_length", len(result.PrerequisitePath)),
+		zap.Int("context_chunks", len(result.RetrievedContext)),
+		zap.Int("explanation_length", len(result.Explanation)),
+		zap.Bool("explanation_complete", len(result.Explanation) > 500 && (result.Explanation[len(result.Explanation)-1] == '.' || result.Explanation[len(result.Explanation)-1] == '!')))
+
+	// Add response headers for better frontend handling
+	c.Header("Content-Type", "application/json")
+	c.Header("X-Processing-Time", processingTime.String())
+	c.Header("X-Explanation-Length", fmt.Sprintf("%d", len(result.Explanation)))
+
+	// Add warning header if explanation might be incomplete
+	if len(result.Explanation) < 500 {
+		c.Header("X-Response-Warning", "explanation-may-be-incomplete")
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -168,31 +191,43 @@ func (h *Handlers) ListConcepts(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// In your handlers.go, around line 190
 func (h *Handlers) HealthCheck(c *gin.Context) {
-	uptime := time.Since(h.startTime).String()
+	ctx := c.Request.Context()
 
-	// Check system health
-	kgHealthy := h.orchestrator.IsKnowledgeGraphHealthy(c.Request.Context())
-	vsHealthy := h.orchestrator.IsVectorStoreHealthy(c.Request.Context())
-
-	status := "healthy"
-	if !kgHealthy || !vsHealthy {
-		status = "unhealthy"
+	// Get system stats
+	stats, err := h.orchestrator.GetSystemStats(ctx)
+	if err != nil {
+		h.logger.Error("Failed to get system stats", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "error",
+			"error":  "Failed to retrieve system statistics",
+		})
+		return
 	}
 
-	stats, _ := h.orchestrator.GetSystemStats(c.Request.Context())
-
-	response := models.HealthResponse{
-		Status:               status,
-		Service:              "math-learning-framework",
-		KnowledgeGraphLoaded: kgHealthy,
-		VectorStoreLoaded:    vsHealthy,
-		TotalConcepts:        stats.TotalConcepts,
-		TotalChunks:          stats.TotalChunks,
-		Uptime:               uptime,
+	// Check if this is a detailed health check
+	if c.Request.URL.Path == "/api/v1/health-detailed" {
+		c.JSON(http.StatusOK, gin.H{
+			"status":          "healthy",
+			"timestamp":       time.Now().UTC(),
+			"version":         "1.0.0",
+			"total_concepts":  stats.TotalConcepts, // Keep as int64
+			"total_chunks":    stats.TotalChunks,   // Keep as int64
+			"total_edges":     stats.TotalEdges,    // Keep as int64
+			"knowledge_graph": stats.KnowledgeGraph,
+			"vector_store":    stats.VectorStore,
+			"llm_provider":    stats.LLMProvider,
+			"system_health":   stats.SystemHealth,
+		})
+		return
 	}
 
-	c.JSON(http.StatusOK, response)
+	// Simple health check
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "healthy",
+		"timestamp": time.Now().UTC(),
+	})
 }
 
 func min(a, b int) int {

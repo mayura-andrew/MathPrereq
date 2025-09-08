@@ -5,11 +5,14 @@ import (
 	"fmt"
 
 	"github.com/go-openapi/strfmt"
-	"github.com/mathprereq/internal/core/config"
-	"github.com/mathprereq/pkg/logger"
+	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v4/weaviate"
+	"github.com/weaviate/weaviate-go-client/v4/weaviate/auth"
 	"github.com/weaviate/weaviate-go-client/v4/weaviate/graphql"
 	"github.com/weaviate/weaviate/entities/models"
+
+	"github.com/mathprereq/internal/core/config"
+	"github.com/mathprereq/pkg/logger"
 	"go.uber.org/zap"
 )
 
@@ -19,11 +22,12 @@ type Client struct {
 	class  string
 }
 
-type SearchResult struct {
-	Content string  `json:"content"`
-	Concept string  `json:"concept,omitempty"`
-	Chapter string  `json:"chapter,omitempty"`
-	Score   float32 `json:"score,omitempty"`
+type Source struct {
+	URL      string `json:"url,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Author   string `json:"author,omitempty"`
+	Document string `json:"document,omitempty"`
+	Page     int    `json:"page,omitempty"`
 }
 
 type ContentChunk struct {
@@ -31,339 +35,317 @@ type ContentChunk struct {
 	Content    string `json:"content"`
 	Concept    string `json:"concept"`
 	Chapter    string `json:"chapter"`
-	Source     string `json:"source"`
+	Source     Source `json:"source"` // Keep as Source struct
 	ChunkIndex int    `json:"chunk_index"`
+}
+
+type SearchResult struct {
+	Content string  `json:"content"`
+	Concept string  `json:"concept"`
+	Chapter string  `json:"chapter"`
+	Score   float32 `json:"score"`
 }
 
 func NewClient(cfg config.WeaviateConfig) (*Client, error) {
 	logger := logger.MustGetLogger()
 
-	client, err := weaviate.NewClient(weaviate.Config{
-		Host:   cfg.Host,
-		Scheme: cfg.Scheme,
-	})
+	APIKey := "bTJHVTdjOUlaT0xRVXJ1QV9OZkJJRFo5T3N0a1VoaGFkeXJqOTZXK25yamZtS1ZUSnBELzFoRGJpaXNvPV92MjAw"
+	// Configure Weaviate client
+	weaviateConfig := weaviate.Config{
+		Host:       cfg.Host,
+		Scheme:     cfg.Scheme,
+		AuthConfig: auth.ApiKey{Value: APIKey},
+		 Headers: map[string]string{
+            "X-Weaviate-Cluster-Url": fmt.Sprintf("%s://%s", cfg.Scheme, cfg.Host),
+        },
+	}
+
+	weaviateClient, err := weaviate.NewClient(weaviateConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Weaviate client: %w", err)
 	}
 
-	// Test connection
-	ctx := context.Background()
-	ready, err := client.Misc().ReadyChecker().Do(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check Weaviate readiness: %w", err)
-	}
-
-	if !ready {
-		return nil, fmt.Errorf("Weaviate is not ready")
-	}
-
-	weaviateClient := &Client{
-		client: client,
+	client := &Client{
+		client: weaviateClient,
 		logger: logger,
 		class:  cfg.Class,
 	}
 
-	if err := weaviateClient.ensureSchema(ctx); err != nil {
-		return nil, fmt.Errorf("failed to ensure schema: %w", err)
+	// Test connection
+	if !client.IsHealthy(context.Background()) {
+		return nil, fmt.Errorf("weaviate is not healthy at %s://%s", cfg.Scheme, cfg.Host)
 	}
 
-	logger.Info("Connected to Weaviate", zap.String("host", cfg.Host))
+	// Initialize schema
+	if err := client.initSchema(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
 
-	return weaviateClient, nil
+	logger.Info("Weaviate client initialized successfully",
+		zap.String("host", cfg.Host),
+		zap.String("class", cfg.Class))
+
+	return client, nil
 }
 
-func (c *Client) ensureSchema(ctx context.Context) error {
-	// Check if class exists
+func (c *Client) initSchema(ctx context.Context) error {
+	// Check if class already exists
 	exists, err := c.client.Schema().ClassExistenceChecker().WithClassName(c.class).Do(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to check class existence: %w", err)
 	}
 
 	if exists {
-		c.logger.Info("Schema already exists", zap.String("class", c.class))
+		c.logger.Info("Schema class already exists", zap.String("class", c.class))
 		return nil
 	}
 
-	// Create class schema with Google vectorizer configuration
-	schema := &models.Class{
-		Class:       c.class,
-		Description: "Calculus textbook content for semantic search",
-		Vectorizer:  "text2vec-google",
-		ModuleConfig: map[string]interface{}{
-			"text2vec-google": map[string]interface{}{
-				"model":              "text-embedding-004",
-				"projectId":          "mathprereq",
-				"dimensions":         768,
-				"vectorizeClassName": false,
-			},
-			"generative-google": map[string]interface{}{
-				"model":     "gemini-2.5-pro",
-				"projectId": "mathprereq",
-			},
-		},
+	// Create class schema
+	classObj := &models.Class{
+		Class:      c.class,
+		Vectorizer: "text2vec-weaviate",
 		Properties: []*models.Property{
 			{
-				Name:        "content",
-				Description: "Text content of the chunk",
 				DataType:    []string{"text"},
-				ModuleConfig: map[string]interface{}{
-					"text2vec-google": map[string]interface{}{
-						"skip": false,
-					},
-				},
+				Name:        "content",
+				Description: "The text content of the chunk",
 			},
 			{
+				DataType:    []string{"string"},
 				Name:        "concept",
-				Description: "Mathematical concept covered",
-				DataType:    []string{"string"},
-				ModuleConfig: map[string]interface{}{
-					"text2vec-google": map[string]interface{}{
-						"skip": true,
-					},
-				},
+				Description: "The mathematical concept this chunk relates to",
 			},
 			{
+				DataType:    []string{"string"},
 				Name:        "chapter",
-				Description: "Chapter or section name",
-				DataType:    []string{"string"},
-				ModuleConfig: map[string]interface{}{
-					"text2vec-google": map[string]interface{}{
-						"skip": true,
-					},
-				},
+				Description: "The chapter or section this chunk comes from",
 			},
 			{
+				DataType:    []string{"string"},
 				Name:        "source",
-				Description: "Source document",
-				DataType:    []string{"string"},
-				ModuleConfig: map[string]interface{}{
-					"text2vec-google": map[string]interface{}{
-						"skip": true,
-					},
-				},
+				Description: "The source document or material",
 			},
 			{
-				Name:        "chunk_index",
-				Description: "Index of the chunk in the document",
 				DataType:    []string{"int"},
+				Name:        "chunkIndex",
+				Description: "The index of this chunk within the source",
 			},
 		},
 	}
 
-	if err := c.client.Schema().ClassCreator().WithClass(schema).Do(ctx); err != nil {
-		return fmt.Errorf("failed to create schema: %w", err)
+	err = c.client.Schema().ClassCreator().WithClass(classObj).Do(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create class: %w", err)
 	}
 
-	c.logger.Info("Created schema with Google vectorizer", zap.String("class", c.class))
+	c.logger.Info("Created schema class", zap.String("class", c.class))
 	return nil
 }
 
 func (c *Client) SemanticSearch(ctx context.Context, query string, limit int) ([]SearchResult, error) {
-	if limit <= 0 {
-		limit = 3
+	c.logger.Info("Performing semantic search",
+		zap.String("query", query),
+		zap.Int("limit", limit))
+
+	// Build the nearText argument
+	nearText := c.client.GraphQL().NearTextArgBuilder().
+		WithConcepts([]string{query})
+
+	// Build fields using the proper field builders
+	fields := []graphql.Field{
+		{Name: "content"},
+		{Name: "concept"},
+		{Name: "chapter"},
+		{
+			Name: "_additional",
+			Fields: []graphql.Field{
+				{Name: "certainty"},
+			},
+		},
 	}
 
-	result, err := c.client.GraphQL().Get().WithClassName(c.class).WithFields(
-		graphql.Field{Name: "content"},
-		graphql.Field{Name: "concept"},
-		graphql.Field{Name: "chapter"},
-		graphql.Field{Name: "_additional", Fields: []graphql.Field{
-			{Name: "certainty"},
-		}},
-	).
-		WithNearText(c.client.GraphQL().NearTextArgBuilder().
-			WithConcepts([]string{query})).WithLimit(limit).Do(ctx)
+	// Build the GraphQL query
+	result, err := c.client.GraphQL().Get().
+		WithClassName(c.class).
+		WithFields(fields...).
+		WithNearText(nearText).
+		WithLimit(limit).
+		Do(ctx)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to perform semantic search: %w", err)
+		return nil, fmt.Errorf("semantic search failed: %w", err)
 	}
 
+	// Parse results
 	var searchResults []SearchResult
 
-	if result.Data["Get"] != nil {
-		classData := result.Data["Get"].(map[string]interface{})[c.class]
-		if classData != nil {
-			for _, item := range classData.([]interface{}) {
-				obj := item.(map[string]interface{})
+	if result.Data != nil {
+		if get, ok := result.Data["Get"].(map[string]interface{}); ok {
+			if classData, ok := get[c.class].([]interface{}); ok {
+				for _, item := range classData {
+					if obj, ok := item.(map[string]interface{}); ok {
+						searchResult := SearchResult{
+							Content: getStringField(obj, "content"),
+							Concept: getStringField(obj, "concept"),
+							Chapter: getStringField(obj, "chapter"),
+						}
 
-				searchResult := SearchResult{
-					Content: obj["content"].(string),
-				}
+						// Extract certainty score from _additional
+						if additional, ok := obj["_additional"].(map[string]interface{}); ok {
+							if certainty, ok := additional["certainty"].(float64); ok {
+								searchResult.Score = float32(certainty)
+							}
+						}
 
-				if concept, ok := obj["concept"]; ok && concept != nil {
-					searchResult.Concept = concept.(string)
-				}
-
-				if chapter, ok := obj["chapter"]; ok && chapter != nil {
-					searchResult.Chapter = chapter.(string)
-				}
-
-				if additional, ok := obj["_additional"]; ok {
-					if certainty, ok := additional.(map[string]interface{})["certainty"]; ok {
-						searchResult.Score = float32(certainty.(float64))
+						searchResults = append(searchResults, searchResult)
 					}
 				}
-
-				searchResults = append(searchResults, searchResult)
 			}
 		}
 	}
 
 	c.logger.Info("Semantic search completed",
-		zap.String("query", query),
 		zap.Int("results", len(searchResults)))
 
 	return searchResults, nil
 }
 
-func (c *Client) AddContent(ctx context.Context, content []ContentChunk) error {
-	if len(content) == 0 {
-		return nil
+// Helper function to safely extract string fields
+func getStringField(obj map[string]interface{}, field string) string {
+	if value, ok := obj[field].(string); ok {
+		return value
 	}
+	return ""
+}
 
+func (c *Client) AddContent(ctx context.Context, content []ContentChunk) error {
+	c.logger.Info("Adding content to vector store",
+		zap.Int("chunks", len(content)))
+
+	// Batch insert for better performance
 	batcher := c.client.Batch().ObjectsBatcher()
 
-	for i, chunk := range content {
-		obj := &models.Object{
-			Class: c.class,
-			ID:    strfmt.UUID(chunk.ID),
-			Properties: map[string]interface{}{
-				"content":     chunk.Content,
-				"concept":     chunk.Concept,
-				"chapter":     chunk.Chapter,
-				"source":      chunk.Source,
-				"chunk_index": chunk.ChunkIndex,
-			},
+	for _, chunk := range content {
+		// Convert Source struct to string for Weaviate storage
+		sourceStr := chunk.Source.Document
+		if sourceStr == "" {
+			sourceStr = chunk.Source.Title
+		}
+		if sourceStr == "" {
+			sourceStr = "unknown"
 		}
 
-		batcher = batcher.WithObject(obj)
+		properties := map[string]interface{}{
+			"content":    chunk.Content,
+			"concept":    chunk.Concept,
+			"chapter":    chunk.Chapter,
+			"source":     sourceStr, // Convert Source to string
+			"chunkIndex": chunk.ChunkIndex,
+		}
 
-		// Batch in groups of 100
-		if (i+1)%100 == 0 || i == len(content)-1 {
-			if _, err := batcher.Do(ctx); err != nil {
-				return fmt.Errorf("failed to batch upload objects: %w", err)
+		// Generate a proper UUID for the chunk
+		uuidValue := uuid.New().String()
+
+		obj := &models.Object{
+			Class:      c.class,
+			ID:         strfmt.UUID(uuidValue),
+			Properties: properties,
+		}
+
+		batcher = batcher.WithObjects(obj)
+	}
+
+	// Execute batch
+	batchResult, err := batcher.Do(ctx)
+	if err != nil {
+		return fmt.Errorf("batch insert failed: %w", err)
+	}
+
+	// Check for errors in batch result
+	if batchResult != nil {
+		for i, result := range batchResult {
+			if result.Result.Errors != nil && len(result.Result.Errors.Error) > 0 {
+				c.logger.Warn("Error adding content chunk",
+					zap.Int("chunk_index", i),
+					zap.Any("errors", result.Result.Errors.Error))
 			}
-			batcher = c.client.Batch().ObjectsBatcher()
 		}
 	}
 
-	c.logger.Info("Added content to vector store", zap.Int("chunks", len(content)))
+	c.logger.Info("Successfully added content to vector store")
 	return nil
 }
 
 func (c *Client) IsHealthy(ctx context.Context) bool {
-	ready, err := c.client.Misc().ReadyChecker().Do(ctx)
-	return err == nil && ready
+	// Check if we can connect to Weaviate
+	result, err := c.client.Misc().LiveChecker().Do(ctx)
+	if err != nil {
+		c.logger.Warn("Weaviate health check failed", zap.Error(err))
+		return false
+	}
+
+	return result
 }
 
 func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
+	// Get object count for the class
 	result, err := c.client.GraphQL().Aggregate().
 		WithClassName(c.class).
-		WithFields(graphql.Field{Name: "meta", Fields: []graphql.Field{
-			{Name: "count"},
-		}}).
+		WithFields(graphql.Field{
+			Name: "meta",
+			Fields: []graphql.Field{
+				{Name: "count"},
+			},
+		}).
 		Do(ctx)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get stats: %w", err)
+		c.logger.Warn("Failed to get Weaviate stats", zap.Error(err))
+		return map[string]interface{}{
+			"total_chunks": int64(0),
+			"status":       "unhealthy",
+		}, err
 	}
 
-	stats := map[string]interface{}{
-		"total_chunks": 0,
-	}
-
+	totalChunks := int64(0)
 	if result.Data["Aggregate"] != nil {
-		classData := result.Data["Aggregate"].(map[string]interface{})[c.class]
-		if classData != nil {
-			for _, item := range classData.([]interface{}) {
-				obj := item.(map[string]interface{})
-				if meta, ok := obj["meta"]; ok {
-					if count, ok := meta.(map[string]interface{})["count"]; ok {
-						stats["total_chunks"] = int(count.(float64))
+		if classData, ok := result.Data["Aggregate"].(map[string]interface{})[c.class]; ok {
+			if objects, ok := classData.([]interface{}); ok && len(objects) > 0 {
+				if objMap, ok := objects[0].(map[string]interface{}); ok {
+					if meta, exists := objMap["meta"]; exists {
+						if metaMap, ok := meta.(map[string]interface{}); ok {
+							if count, exists := metaMap["count"]; exists {
+								if countFloat, ok := count.(float64); ok {
+									totalChunks = int64(countFloat)
+								}
+							}
+						}
 					}
 				}
 			}
 		}
 	}
 
-	return stats, nil
+	return map[string]interface{}{
+		"total_chunks": totalChunks,
+		"status":       "healthy",
+	}, nil
 }
 
-// Add this method to your Client struct for Google-powered generative search
-// func (c *Client) GenerativeSearch(ctx context.Context, query string, limit int) ([]SearchResult, error) {
-// 	if limit <= 0 {
-// 		limit = 3
-// 	}
+func (c *Client) DeleteAll(ctx context.Context) error {
+	c.logger.Info("Deleting all content from vector store")
 
-// 	result, err := c.client.GraphQL().Get().WithClassName(c.class).WithFields(
-// 		graphql.Field{Name: "content"},
-// 		graphql.Field{Name: "concept"},
-// 		graphql.Field{Name: "chapter"},
-// 		graphql.Field{Name: "_additional", Fields: []graphql.Field{
-// 			{Name: "certainty"},
-// 			{Name: "generate", Fields: []graphql.Field{
-// 				{Name: "singleResult"},
-// 				{Name: "error"},
-// 			}},
-// 		}},
-// 	).
-// 		WithNearText(c.client.GraphQL().NearTextArgBuilder().
-// 			WithConcepts([]string{query})).
-// 		WithGenerate(&graphql.GenerateBuilder{
-// 			SinglePrompt: "Explain this mathematical concept in simple terms: {content}",
-// 		}).
-// 		WithLimit(limit).Do(ctx)
+	// Delete the entire class and recreate it
+	err := c.client.Schema().ClassDeleter().WithClassName(c.class).Do(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to delete class: %w", err)
+	}
 
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to perform generative search: %w", err)
-// 	}
+	// Recreate the schema
+	if err := c.initSchema(ctx); err != nil {
+		return fmt.Errorf("failed to recreate schema: %w", err)
+	}
 
-// 	var searchResults []SearchResult
-
-// 	if result.Data["Get"] != nil {
-// 		classData := result.Data["Get"].(map[string]interface{})[c.class]
-// 		if classData != nil {
-// 			for _, item := range classData.([]interface{}) {
-// 				obj := item.(map[string]interface{})
-
-// 				searchResult := SearchResult{
-// 					Content: obj["content"].(string),
-// 				}
-
-// 				if concept, ok := obj["concept"]; ok && concept != nil {
-// 					searchResult.Concept = concept.(string)
-// 				}
-
-// 				if chapter, ok := obj["chapter"]; ok && chapter != nil {
-// 					searchResult.Chapter = chapter.(string)
-// 				}
-
-// 				if additional, ok := obj["_additional"]; ok {
-// 					addMap := additional.(map[string]interface{})
-
-// 					if certainty, ok := addMap["certainty"]; ok {
-// 						searchResult.Score = float32(certainty.(float64))
-// 					}
-
-// 					// Add generated explanation if available
-// 					if generate, ok := addMap["generate"]; ok {
-// 						if genMap, ok := generate.(map[string]interface{}); ok {
-// 							if singleResult, ok := genMap["singleResult"]; ok && singleResult != nil {
-// 								// You could add this to your SearchResult struct
-// 								c.logger.Debug("Generated explanation", zap.String("explanation", singleResult.(string)))
-// 							}
-// 						}
-// 					}
-// 				}
-
-// 				searchResults = append(searchResults, searchResult)
-// 			}
-// 		}
-// 	}
-
-// 	c.logger.Info("Generative search completed",
-// 		zap.String("query", query),
-// 		zap.Int("results", len(searchResults)))
-
-// 	return searchResults, nil
-// }
+	c.logger.Info("Successfully deleted all content")
+	return nil
+}

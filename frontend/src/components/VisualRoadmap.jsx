@@ -13,33 +13,94 @@ import { MapIcon } from '@heroicons/react/24/outline';
 const VisualRoadmap = ({ learningPath, onNodeClick, isLoading }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [concepts, setConcepts] = React.useState([]);
 
   // Convert learning path to nodes and edges
   useEffect(() => {
-    if (!learningPath?.concepts || learningPath.concepts.length === 0) {
+    console.log('VisualRoadmap received learningPath:', learningPath)
+    
+    // Handle different API response structures
+    let processedConcepts = []
+    
+    if (learningPath?.concepts) {
+      // If concepts array exists directly
+      processedConcepts = learningPath.concepts
+    } else if (learningPath?.identified_concepts) {
+      // Create concepts from identified concepts
+      processedConcepts = learningPath.identified_concepts.map((concept, index) => ({
+        id: `concept-${index}`,
+        name: typeof concept === 'string' ? concept : concept.name,
+        type: index === learningPath.identified_concepts.length - 1 ? 'target' : 'prerequisite'
+      }))
+    } else if (learningPath?.learning_path?.concepts) {
+      // Check nested learning_path structure
+      processedConcepts = learningPath.learning_path.concepts
+    } else {
+      // Fallback: create concepts from available data
+      const allConcepts = []
+      
+      // Add prerequisites
+      if (learningPath?.prerequisites || learningPath?.prerequisite_concepts) {
+        const prereqs = learningPath.prerequisites || learningPath.prerequisite_concepts
+        prereqs.forEach((concept, index) => {
+          allConcepts.push({
+            id: `prereq-${index}`,
+            name: typeof concept === 'string' ? concept : concept.name,
+            type: 'prerequisite'
+          })
+        })
+      }
+      
+      // Add current topic
+      if (learningPath?.identified_concepts) {
+        learningPath.identified_concepts.forEach((concept, index) => {
+          allConcepts.push({
+            id: `current-${index}`,
+            name: typeof concept === 'string' ? concept : concept.name,
+            type: 'target'
+          })
+        })
+      }
+      
+      // Add related concepts
+      if (learningPath?.related_concepts) {
+        learningPath.related_concepts.forEach((concept, index) => {
+          allConcepts.push({
+            id: `related-${index}`,
+            name: typeof concept === 'string' ? concept : concept.name,
+            type: 'related'
+          })
+        })
+      }
+      
+      processedConcepts = allConcepts
+    }
+    
+    setConcepts(processedConcepts)
+    console.log('Processing concepts for visualization:', processedConcepts)
+    
+    if (!processedConcepts || processedConcepts.length === 0) {
       setNodes([]);
       setEdges([]);
       return;
     }
-
-    const concepts = learningPath.concepts;
     
     // Create nodes
-    const newNodes = concepts.map((concept, index) => {
+    const newNodes = processedConcepts.map((concept, index) => {
       const isTarget = concept.type === 'target';
       const isPrerequisite = concept.type === 'prerequisite';
       
       return {
-        id: concept.id,
+        id: concept.id || `node-${index}`,
         position: { 
           x: index * 250, 
           y: Math.sin(index * 0.5) * 50 + 100 
         },
         data: { 
-          label: concept.name,
+          label: concept.name || concept.title || concept,
           description: concept.description,
           type: concept.type,
-          onClick: () => onNodeClick(concept.id)
+          onClick: () => onNodeClick && onNodeClick(concept.id || `node-${index}`)
         },
         style: {
           background: isTarget ? '#3B82F6' : isPrerequisite ? '#10B981' : '#6B7280',
@@ -58,17 +119,22 @@ const VisualRoadmap = ({ learningPath, onNodeClick, isLoading }) => {
     });
 
     // Create edges connecting the concepts
-    const newEdges = concepts.slice(0, -1).map((concept, index) => ({
-      id: `e${concept.id}-${concepts[index + 1].id}`,
-      source: concept.id,
-      target: concepts[index + 1].id,
-      animated: true,
-      style: { 
-        stroke: '#374151', 
-        strokeWidth: 2 
-      },
-      type: 'smoothstep',
-    }));
+    const newEdges = processedConcepts.slice(0, -1).map((concept, index) => {
+      const sourceId = concept.id || `node-${index}`;
+      const targetId = processedConcepts[index + 1].id || `node-${index + 1}`;
+      
+      return {
+        id: `e${sourceId}-${targetId}`,
+        source: sourceId,
+        target: targetId,
+        animated: true,
+        style: { 
+          stroke: '#374151', 
+          strokeWidth: 2 
+        },
+        type: 'smoothstep',
+      };
+    });
 
     setNodes(newNodes);
     setEdges(newEdges);
@@ -81,7 +147,11 @@ const VisualRoadmap = ({ learningPath, onNodeClick, isLoading }) => {
     }
   }, [isLoading]);
 
-  if (!learningPath?.concepts || learningPath.concepts.length === 0) {
+  if (!learningPath || 
+      (!learningPath.concepts && 
+       !learningPath.identified_concepts && 
+       !learningPath.prerequisites && 
+       !learningPath.related_concepts)) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex items-center mb-4">
@@ -108,7 +178,7 @@ const VisualRoadmap = ({ learningPath, onNodeClick, isLoading }) => {
           </h2>
         </div>
         <div className="text-sm text-gray-600">
-          {learningPath.total_concepts} concepts • Click to explore
+          {concepts.length} concepts • Click to explore
         </div>
       </div>
       
