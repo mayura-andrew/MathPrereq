@@ -178,6 +178,15 @@ func (h *Handlers) ListConcepts(c *gin.Context) {
 		return
 	}
 
+	h.logger.Info("Retrieved concepts for listing", zap.Int("total_concepts", len(concepts)))
+	for i, concept := range concepts {
+		if i < 5 { // Log first 5 for debugging
+			h.logger.Info("Concept in database",
+				zap.String("id", concept.ID),
+				zap.String("name", concept.Name))
+		}
+	}
+
 	response := make([]models.ConceptInfo, len(concepts))
 	for i, concept := range concepts {
 		response[i] = models.ConceptInfo{

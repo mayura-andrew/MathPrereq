@@ -71,11 +71,16 @@ const LearningPath = ({ learningPath }) => {
       
       setLearningPanel(prev => ({
         ...prev,
-        explanation: conceptDetail.explanation || conceptDetail.answer,
+        explanation: conceptDetail.detailed_explanation || conceptDetail.explanation || conceptDetail.answer,
         prerequisites: conceptDetail.prerequisites || [],
         examples: conceptDetail.examples || [],
-        resources: conceptDetail.resources || []
+        resources: conceptDetail.resources || [],
+        leads_to: conceptDetail.leads_to || []
       }))
+      
+      // Debug logging to see what we received
+      console.log('🔍 Concept detail received:', conceptDetail)
+      console.log('📚 Prerequisites found:', conceptDetail.prerequisites)
     } catch (error) {
       console.error('Failed to load concept details:', error)
       setLearningPanel(prev => ({
@@ -137,11 +142,28 @@ const LearningPath = ({ learningPath }) => {
 
         <div className="learning-path-content">
           {pathData.map((item, index) => {
-            // Handle different item structures
-            const concept = item.concept || item.name || item.title || item.topic || (typeof item === 'string' ? item : `Concept ${index + 1}`)
-            const description = item.description || item.explanation || item.details || ''
-            const difficulty = item.difficulty || item.level || 'Beginner'
-            const estimatedTime = item.estimated_time || item.time || item.duration || '10-15 min'
+            // Handle different item structures - fix object rendering issue
+            let concept, description, difficulty, estimatedTime
+            
+            if (typeof item === 'object' && item !== null) {
+              // Handle object with id, name, description properties
+              concept = item.name || item.concept || item.title || item.topic || `Concept ${index + 1}`
+              description = item.description || item.explanation || item.details || ''
+              difficulty = item.difficulty || item.level || 'Beginner'
+              estimatedTime = item.estimated_time || item.time || item.duration || '10-15 min'
+            } else if (typeof item === 'string') {
+              // Handle string items
+              concept = item
+              description = ''
+              difficulty = 'Beginner'
+              estimatedTime = '10-15 min'
+            } else {
+              // Fallback for any other type
+              concept = `Concept ${index + 1}`
+              description = ''
+              difficulty = 'Beginner' 
+              estimatedTime = '10-15 min'
+            }
             
             return (
               <div key={index} className="learning-step">
@@ -274,17 +296,46 @@ const LearningPath = ({ learningPath }) => {
                 )}
 
                 {/* Prerequisites */}
-                {learningPanel.prerequisites && learningPanel.prerequisites.length > 0 && (
+                {console.log('🔍 Checking prerequisites:', learningPanel.prerequisites)}
+                {learningPanel.prerequisites && learningPanel.prerequisites.length > 0 ? (
                   <div className="prerequisites-section">
-                    <h4>Prerequisites</h4>
+                    <h4>📚 Prerequisites</h4>
+                    <p style={{ color: 'var(--edu-gray-600)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                      You should understand these concepts first:
+                    </p>
                     <div className="prerequisites-list">
-                      {learningPanel.prerequisites.map((prereq, index) => (
-                        <div key={index} className="prerequisite-item">
-                          <ArrowRightIcon className="w-4 h-4" />
-                          <span>{prereq}</span>
-                        </div>
-                      ))}
+                      {learningPanel.prerequisites.map((prereq, index) => {
+                        console.log(`📋 Processing prerequisite ${index}:`, prereq)
+                        
+                        // Safely extract prerequisite information
+                        const prereqName = typeof prereq === 'string' ? prereq : 
+                                         prereq?.name || prereq?.title || `Prerequisite ${index + 1}`
+                        const prereqDesc = typeof prereq === 'object' ? 
+                                         prereq?.description || '' : ''
+                        const prereqType = typeof prereq === 'object' ? 
+                                         prereq?.type || 'concept' : 'concept'
+                        
+                        console.log(`✅ Extracted: name="${prereqName}", desc="${prereqDesc}", type="${prereqType}"`)
+                        
+                        return (
+                          <div key={index} className="prerequisite-item">
+                            <ArrowRightIcon className="w-4 h-4" style={{ color: 'var(--edu-primary)' }} />
+                            <div className="prerequisite-content">
+                              <span className="prerequisite-title">{prereqName}</span>
+                              {prereqDesc && (
+                                <span className="prerequisite-description">{prereqDesc}</span>
+                              )}
+                              <span className="prerequisite-type">{prereqType}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
+                  </div>
+                ) : (
+                  <div className="no-prerequisites">
+                    <p>No prerequisites found or prerequisites data is empty.</p>
+                    <small>Debug: {JSON.stringify(learningPanel.prerequisites)}</small>
                   </div>
                 )}
 
@@ -293,12 +344,18 @@ const LearningPath = ({ learningPath }) => {
                   <div className="examples-section">
                     <h4>Examples</h4>
                     <div className="examples-list">
-                      {learningPanel.examples.map((example, index) => (
-                        <div key={index} className="example-item">
-                          <DocumentTextIcon className="w-4 h-4" />
-                          <span>{example}</span>
-                        </div>
-                      ))}
+                      {learningPanel.examples.map((example, index) => {
+                        // Safely extract example text
+                        const exampleText = typeof example === 'string' ? example : 
+                                          example?.name || example?.title || example?.description || 
+                                          `Example ${index + 1}`
+                        return (
+                          <div key={index} className="example-item">
+                            <DocumentTextIcon className="w-4 h-4" />
+                            <span>{exampleText}</span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -337,20 +394,60 @@ const LearningPath = ({ learningPath }) => {
                       <div className="general-resources">
                         <a href={`https://www.khanacademy.org/search?query=${encodeURIComponent(learningPanel.concept)}`} 
                            target="_blank" rel="noopener noreferrer" className="resource-link">
-                          <GlobeAltIcon className="w-4 h-4" />
-                          <span>Khan Academy</span>
+                          <div className="resource-icon">
+                            <GlobeAltIcon className="w-4 h-4" />
+                          </div>
+                          <div className="resource-content">
+                            <span className="resource-title">Khan Academy</span>
+                            <span className="resource-type">Educational Platform</span>
+                          </div>
                           <LinkIcon className="w-4 h-4 resource-external" />
                         </a>
                         <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(learningPanel.concept + ' math tutorial')}`} 
                            target="_blank" rel="noopener noreferrer" className="resource-link">
-                          <PlayIcon className="w-4 h-4" />
-                          <span>YouTube Tutorials</span>
+                          <div className="resource-icon">
+                            <PlayIcon className="w-4 h-4" />
+                          </div>
+                          <div className="resource-content">
+                            <span className="resource-title">YouTube Tutorials</span>
+                            <span className="resource-type">Video Tutorials</span>
+                          </div>
                           <LinkIcon className="w-4 h-4 resource-external" />
                         </a>
                       </div>
                     </div>
                   )}
                 </div>
+
+                {/* What This Enables (Leads To) */}
+                {learningPanel.leads_to && learningPanel.leads_to.length > 0 && (
+                  <div className="leads-to-section">
+                    <h4>🚀 What This Enables</h4>
+                    <p style={{ color: 'var(--edu-gray-600)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                      Once you master this concept, you'll be ready to learn:
+                    </p>
+                    <div className="leads-to-list">
+                      {learningPanel.leads_to.map((nextConcept, index) => {
+                        const conceptText = typeof nextConcept === 'string' ? nextConcept : 
+                                          nextConcept?.name || nextConcept?.title || nextConcept?.description || 
+                                          `Next Concept ${index + 1}`
+                        const conceptDesc = typeof nextConcept === 'object' ? 
+                                          nextConcept?.description || '' : ''
+                        return (
+                          <div key={index} className="leads-to-item">
+                            <ArrowRightIcon className="w-4 h-4" style={{ color: 'var(--edu-secondary)' }} />
+                            <div className="leads-to-content">
+                              <span className="leads-to-title">{conceptText}</span>
+                              {conceptDesc && (
+                                <span className="leads-to-description">{conceptDesc}</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Error Message */}
                 {learningPanel.error && (

@@ -105,7 +105,7 @@ func setDefaults() {
 
 	// LLM defaults
 	viper.SetDefault("llm.provider", "gemini")
-	viper.SetDefault("llm.model", "gemini-2.5-pro")
+	viper.SetDefault("llm.model", "gemini-2.0-flash-exp")
 	viper.SetDefault("llm.max_tokens", 2048)
 	viper.SetDefault("llm.retry_attempts", 3)
 

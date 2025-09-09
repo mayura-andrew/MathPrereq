@@ -195,7 +195,7 @@ func (c *Client) callLLM(ctx context.Context, systemPrompt, userPrompt string, t
 	// Gemini/GenAI logic using the correct API
 	model := c.config.Model
 	if model == "" {
-		model = "gemini-1.5-pro" // fallback
+		model = "gemini-2.0-flash-exp" // fallback
 	}
 
 	// Create the full prompt combining system and user prompts
