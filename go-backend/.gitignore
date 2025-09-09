@@ -46,3 +46,4 @@ vendor/
 
 # Air
 .air.toml
+config.yaml

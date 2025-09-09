@@ -1,54 +1,146 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
+import { 
+  BookmarkIcon, 
+  ArrowLeftIcon,
+  CheckCircleIcon,
+  MapIcon,
+  AcademicCapIcon,
+  ChartBarIcon
+} from '@heroicons/react/24/outline'
+import { BookmarkIcon as BookmarkSolid } from '@heroicons/react/24/solid'
 import StepByStepAnswer from './StepByStepAnswer'
+import TextualExplanation from './TextualExplanation'
+import LearningPath from './LearningPath'
 import VisualRoadmap from './VisualRoadmap'
 
 const AnswerPhase = ({ question, answer, onSave, onNewQuestion, isSaved }) => {
-  const [activeTab, setActiveTab] = useState('answer')
+  const [activeView, setActiveView] = useState('explanation')
+
+  // Debug logging to help identify learning path issues
+  console.log('AnswerPhase - Full answer object:', answer)
+  console.log('AnswerPhase - Learning path data:', answer?.learning_path)
+  console.log('AnswerPhase - Prerequisites data:', answer?.prerequisites)
+  console.log('AnswerPhase - Concepts data:', answer?.concepts)
+
+  const viewOptions = [
+    {
+      id: 'explanation',
+      label: 'Step-by-Step',
+      icon: AcademicCapIcon,
+      description: 'Detailed solution'
+    },
+    {
+      id: 'learning',
+      label: 'Learning Path',
+      icon: MapIcon,
+      description: 'Prerequisites & concepts'
+    },
+    {
+      id: 'visual',
+      label: 'Visual Roadmap',
+      icon: ChartBarIcon,
+      description: 'Interactive concept map'
+    }
+  ]
 
   return (
-    <div className="answer-phase">
+    <div className="answer-phase-container">
+      {/* Header Section */}
       <div className="answer-header">
-        <button className="back-btn" onClick={onNewQuestion}>
-          ← Ask New Question
-        </button>
-        <h2 className="question-title">{question}</h2>
-        <button 
-          className={`save-btn ${isSaved ? 'saved' : ''}`}
-          onClick={onSave}
-          disabled={isSaved}
-        >
-          {isSaved ? '✓ Saved' : '💾 Save'}
-        </button>
+        <div className="answer-nav">
+          <button 
+            onClick={onNewQuestion}
+            className="nav-back-button"
+            title="Ask new question"
+          >
+            <ArrowLeftIcon className="w-5 h-5" />
+            <span>New Question</span>
+          </button>
+          
+          <button 
+            onClick={onSave}
+            className={`save-button ${isSaved ? 'save-button-saved' : ''}`}
+            title={isSaved ? 'Already saved' : 'Save this answer'}
+          >
+            {isSaved ? (
+              <>
+                <CheckCircleIcon className="w-5 h-5" />
+                <span>Saved</span>
+              </>
+            ) : (
+              <>
+                <BookmarkIcon className="w-5 h-5" />
+                <span>Save</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="question-display">
+          <div className="question-icon">
+            <AcademicCapIcon className="w-6 h-6" />
+          </div>
+          <h1 className="question-text">{question}</h1>
+        </div>
+
+        {/* View Tabs */}
+        <div className="view-tabs">
+          {viewOptions.map((view) => {
+            const IconComponent = view.icon
+            return (
+              <button
+                key={view.id}
+                onClick={() => setActiveView(view.id)}
+                className={`view-tab ${activeView === view.id ? 'view-tab-active' : ''}`}
+                title={view.description}
+              >
+                <IconComponent className="w-5 h-5" />
+                <span>{view.label}</span>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
+      {/* Content Section */}
       <div className="answer-content">
-        <div className="tab-navigation">
-          <button
-            className={activeTab === 'answer' ? 'tab active' : 'tab'}
-            onClick={() => setActiveTab('answer')}
-          >
-            📝 Step-by-Step Answer
-          </button>
-          <button
-            className={activeTab === 'path' ? 'tab active' : 'tab'}
-            onClick={() => setActiveTab('path')}
-          >
-            🗺️ Learning Path
-          </button>
-        </div>
+        {activeView === 'explanation' && (
+          <div className="content-panel">
+            <TextualExplanation response={answer} />
+            {answer.explanation && (
+              <StepByStepAnswer answer={answer} />
+            )}
+          </div>
+        )}
+        
+        {activeView === 'learning' && (
+          <div className="content-panel">
+            {answer.learning_path ? (
+              <LearningPath learningPath={answer.learning_path} />
+            ) : answer.prerequisites ? (
+              <LearningPath learningPath={answer.prerequisites} />
+            ) : answer.concepts ? (
+              <LearningPath learningPath={answer.concepts} />
+            ) : (
+              <div className="learning-path-container">
+                <div className="learning-path-empty">
+                  <MapIcon className="empty-icon" />
+                  <h3>No Learning Path Available</h3>
+                  <p>No learning path or prerequisites were generated for this question.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-        <div className="tab-content">
-          {activeTab === 'answer' && (
-            <StepByStepAnswer answer={answer} />
-          )}
-          {activeTab === 'path' && (
+        {activeView === 'visual' && (
+          <div className="content-panel">
             <VisualRoadmap 
-              learningPath={answer} 
-              onNodeClick={(nodeId) => console.log('Node clicked:', nodeId)}
-              isLoading={false}
+              learningPath={answer.learning_path || answer.prerequisites || answer.concepts || []} 
+              question={question}
             />
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

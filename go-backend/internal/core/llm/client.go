@@ -5,22 +5,19 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/mathprereq/internal/core/config"
 	"github.com/mathprereq/internal/data/neo4j"
 	"github.com/mathprereq/pkg/logger"
-	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/googleai"
-	"github.com/tmc/langchaingo/llms/openai"
 	"go.uber.org/zap"
+	"google.golang.org/genai"
 )
 
 type Client struct {
-	llm      llms.Model
-	config   config.LLMConfig
-	logger   *zap.Logger
-	provider string
+	genaiClient *genai.Client
+	config      config.LLMConfig
+	logger      *zap.Logger
+	provider    string
 }
 
 type ExplanationRequest struct {
@@ -36,14 +33,13 @@ func NewClient(cfg config.LLMConfig) *Client {
 		zap.String("model", cfg.Model),
 		zap.Bool("api_key_provided", cfg.APIKey != ""))
 
-	var llmClient llms.Model
+	var genaiClient *genai.Client
 	var err error
-
-	ctx := context.Background() // Add context
+	ctx := context.Background()
 
 	switch cfg.Provider {
 	case "gemini", "googleai":
-		apiKey := "AIzaSyCH2RhInRfX8bsgvGGGcoAeVzIvSiIdbMY"
+		apiKey := cfg.APIKey
 		if apiKey == "" {
 			apiKey = os.Getenv("GEMINI_API_KEY")
 		}
@@ -53,53 +49,37 @@ func NewClient(cfg config.LLMConfig) *Client {
 		if apiKey == "" {
 			apiKey = os.Getenv("MLF_LLM_API_KEY")
 		}
-		fmt.Print("This is LLM CLient api key")
-		fmt.Println(apiKey)
-
 		if apiKey == "" {
 			logger.Fatal("Gemini API key not found",
 				zap.String("provider", cfg.Provider),
 				zap.String("suggestion", "Set GEMINI_API_KEY, GOOGLE_API_KEY, or MLF_LLM_API_KEY environment variable"))
 		}
 
-		llmClient, err = googleai.New(
-			ctx,
-			googleai.WithAPIKey(apiKey),
-			googleai.WithDefaultModel(cfg.Model),
-		)
-		if err != nil {
-			logger.Fatal("Failed to initialize Gemini client", zap.Error(err))
+		clientConfig := &genai.ClientConfig{
+			APIKey: apiKey,
 		}
-		logger.Info("Initialized Gemini LLM client", zap.String("model", cfg.Model))
-
-	case "openai":
-		llmClient, err = openai.New(
-			openai.WithToken(cfg.APIKey),
-			openai.WithModel(cfg.Model),
-		)
+		genaiClient, err = genai.NewClient(ctx, clientConfig)
 		if err != nil {
-			logger.Fatal("Failed to initialize OpenAI client", zap.Error(err))
+			logger.Fatal("Failed to initialize Gemini GenAI client", zap.Error(err))
 		}
-		logger.Info("Initialized OpenAI LLM client", zap.String("model", cfg.Model))
+		logger.Info("Initialized Gemini GenAI client", zap.String("model", cfg.Model))
 
 	default:
 		logger.Fatal("Unsupported LLM provider", zap.String("provider", cfg.Provider))
 	}
 
 	return &Client{
-		llm:      llmClient,
-		config:   cfg,
-		logger:   logger,
-		provider: cfg.Provider,
+		genaiClient: genaiClient,
+		config:      cfg,
+		logger:      logger,
+		provider:    cfg.Provider,
 	}
 }
 
-// Add the GetProvider method
 func (c *Client) GetProvider() string {
 	return c.provider
 }
 
-// You might also want to add other getter methods
 func (c *Client) GetModel() string {
 	return c.config.Model
 }
@@ -136,7 +116,6 @@ func (c *Client) IdentifyConcepts(ctx context.Context, query string) ([]string, 
 	}
 
 	concepts := strings.Split(strings.TrimSpace(response), ",")
-	fmt.Println(concepts)
 	var cleanedConcepts []string
 	for _, concept := range concepts {
 		cleaned := strings.TrimSpace(concept)
@@ -213,103 +192,52 @@ func (c *Client) GenerateExplanation(ctx context.Context, req ExplanationRequest
 }
 
 func (c *Client) callLLM(ctx context.Context, systemPrompt, userPrompt string, temperature float32) (string, error) {
-	// Don't create a new timeout context - respect the parent context timeout
-	// The orchestrator already manages timeouts appropriately
-
-	// Retry logic
-	var lastErr error
-	maxRetries := c.config.RetryAttempts
-	if maxRetries == 0 {
-		maxRetries = 3 // Default retry attempts
+	// Gemini/GenAI logic using the correct API
+	model := c.config.Model
+	if model == "" {
+		model = "gemini-1.5-pro" // fallback
 	}
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			c.logger.Info("Retrying LLM call",
-				zap.Int("attempt", attempt+1),
-				zap.String("provider", c.config.Provider))
+	// Create the full prompt combining system and user prompts
+	fullPrompt := systemPrompt + "\n\n" + userPrompt
 
-			// Exponential backoff with jitter
-			backoffDuration := time.Duration(attempt) * 2 * time.Second
-			select {
-			case <-time.After(backoffDuration):
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
-		}
+	// Create content using genai.Text
+	contents := genai.Text(fullPrompt)
 
-		c.logger.Info("LLM call starting",
-			zap.Int("attempt", attempt+1),
-			zap.String("provider", c.config.Provider),
-			zap.String("model", c.config.Model))
-
-		messages := []llms.MessageContent{
-			llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
-			llms.TextParts(llms.ChatMessageTypeHuman, userPrompt),
-		}
-
-		// Configure options based on provider with higher token limits
-		var options []llms.CallOption
-		options = append(options, llms.WithTemperature(float64(temperature)))
-
-		// Set appropriate max tokens for complete responses
-		if c.config.Provider == "gemini" || c.config.Provider == "googleai" {
-			maxTokens := c.config.MaxTokens
-			if maxTokens == 0 {
-				maxTokens = 8192 // Higher default for Gemini to avoid truncation
-			}
-			options = append(options, llms.WithMaxTokens(maxTokens))
-		} else {
-			maxTokens := c.config.MaxTokens
-			if maxTokens == 0 {
-				maxTokens = 4096 // Higher default for OpenAI
-			}
-			options = append(options, llms.WithMaxTokens(maxTokens))
-		}
-
-		response, err := c.llm.GenerateContent(ctx, messages, options...)
-
-		if err != nil {
-			lastErr = err
-			c.logger.Warn("LLM call failed",
-				zap.Error(err),
-				zap.Int("attempt", attempt+1),
-				zap.String("provider", c.config.Provider))
-			continue
-		}
-
-		if len(response.Choices) == 0 {
-			lastErr = fmt.Errorf("no response choices returned")
-			c.logger.Warn("Empty response from LLM",
-				zap.Int("attempt", attempt+1),
-				zap.String("provider", c.config.Provider))
-			continue
-		}
-
-		responseContent := response.Choices[0].Content
-		responseLength := len(responseContent)
-
-		c.logger.Info("LLM call successful",
-			zap.String("provider", c.config.Provider),
-			zap.String("model", c.config.Model),
-			zap.Int("attempt", attempt+1),
-			zap.Int("response_length", responseLength),
-			zap.String("response_preview", responseContent[:min(200, responseLength)]))
-
-		// Check if response seems truncated and warn
-		if c.isResponseTruncated(responseContent) {
-			c.logger.Warn("LLM response may be truncated",
-				zap.Int("response_length", responseLength),
-				zap.String("last_50_chars", responseContent[max(0, responseLength-50):]))
-		}
-
-		return responseContent, nil
+	// Create generation config
+	config := &genai.GenerateContentConfig{
+		Temperature:     &temperature,
+		MaxOutputTokens: int32(c.config.MaxTokens),
 	}
 
-	return "", fmt.Errorf("LLM call failed after %d attempts: %w", maxRetries, lastErr)
+	// Generate content with proper parameters
+	resp, err := c.genaiClient.Models.GenerateContent(ctx, model, contents, config)
+	if err != nil {
+		return "", fmt.Errorf("Gemini LLM call failed: %w", err)
+	}
+
+	// Extract response
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("No candidates returned from Gemini")
+	}
+
+	// Extract the text content
+	var content string
+	if resp.Candidates[0].Content != nil {
+		for _, part := range resp.Candidates[0].Content.Parts {
+			if part.Text != "" {
+				content += part.Text
+			}
+		}
+	}
+
+	if content == "" {
+		return "", fmt.Errorf("No text content in Gemini response")
+	}
+
+	return content, nil
 }
 
-// Helper method to detect truncated responses
 func (c *Client) isResponseTruncated(response string) bool {
 	if len(response) == 0 {
 		return true
@@ -339,7 +267,6 @@ func (c *Client) isResponseTruncated(response string) bool {
 	return false
 }
 
-// Helper functions
 func min(a, b int) int {
 	if a < b {
 		return a
