@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
-	"log"
 	"os"
+	"strings"
 
 	"github.com/mathprereq/internal/core/config"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
@@ -14,7 +14,7 @@ import (
 func runCsvToNeo4jMigration() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	driver, err := neo4j.NewDriver(
@@ -22,23 +22,82 @@ func runCsvToNeo4jMigration() error {
 		neo4j.BasicAuth(cfg.Neo4j.Username, cfg.Neo4j.Password, ""),
 	)
 	if err != nil {
-		log.Fatal("Failed to create Neo4j driver:", err)
+		return fmt.Errorf("failed to create Neo4j driver: %w", err)
 	}
 	defer driver.Close(context.Background())
 
 	ctx := context.Background()
 
+	// Check if data already exists
+	if exists, err := checkDataExists(ctx, driver); err != nil {
+		return fmt.Errorf("failed to check existing data: %w", err)
+	} else if exists {
+		fmt.Println("⚠️  Data already exists. Cleaning and reloading...")
+		if err := clearAllData(ctx, driver); err != nil {
+			return fmt.Errorf("failed to clear existing data: %w", err)
+		}
+	}
+
 	// Load nodes
 	if err := loadNodes(ctx, driver, "data/raw/nodes.csv"); err != nil {
-		log.Fatal("Failed to load nodes:", err)
+		return fmt.Errorf("failed to load nodes: %w", err)
 	}
 
 	// Load edges
 	if err := loadEdges(ctx, driver, "data/raw/edges.csv"); err != nil {
-		log.Fatal("Failed to load edges:", err)
+		return fmt.Errorf("failed to load edges: %w", err)
 	}
 
 	fmt.Println("✅ Successfully migrated CSV data to Neo4j")
+	return nil
+}
+
+func checkDataExists(ctx context.Context, driver neo4j.Driver) (bool, error) {
+	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		result, err := tx.Run(ctx, "MATCH (n:Concept) RETURN COUNT(n) as count", nil)
+		if err != nil {
+			return nil, err
+		}
+
+		if result.Next(ctx) {
+			count, _ := result.Record().Get("count")
+			return count.(int64) > 0, nil
+		}
+		return false, nil
+	})
+
+	if err != nil {
+		return false, err
+	}
+
+	return result.(bool), nil
+}
+
+func clearAllData(ctx context.Context, driver neo4j.Driver) error {
+	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+
+	// Delete all relationships first, then all nodes
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		// Delete all relationships first
+		_, err := tx.Run(ctx, "MATCH ()-[r]-() DELETE r", nil)
+		if err != nil {
+			return nil, err
+		}
+
+		// Then delete all nodes
+		_, err = tx.Run(ctx, "MATCH (n) DELETE n", nil)
+		return nil, err
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to clear data: %w", err)
+	}
+
+	fmt.Println("🧹 Cleared existing data")
 	return nil
 }
 
@@ -58,27 +117,23 @@ func loadNodes(ctx context.Context, driver neo4j.Driver, filename string) error 
 	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
-	// Clear existing nodes
-	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		_, err := tx.Run(ctx, "MATCH (n:Concept) DELETE n", nil)
-		return nil, err
-	})
-	if err != nil {
-		return err
-	}
-
-	// Skip header row
+	// Skip header row and process nodes
 	for i, record := range records[1:] {
-		nodeID := record[0]
-		conceptName := record[1]
-		description := record[2]
+		if len(record) < 3 {
+			return fmt.Errorf("invalid record at line %d: expected 3 columns, got %d", i+2, len(record))
+		}
+
+		nodeID := strings.TrimSpace(record[0])
+		conceptName := strings.TrimSpace(record[1])
+		description := strings.TrimSpace(record[2])
 
 		_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 			query := `
 				CREATE (c:Concept {
 					id: $id,
 					name: $name,
-					description: $description
+					description: $description,
+					created_at: datetime()
 				})
 			`
 			_, err := tx.Run(ctx, query, map[string]interface{}{
@@ -90,8 +145,10 @@ func loadNodes(ctx context.Context, driver neo4j.Driver, filename string) error 
 		})
 
 		if err != nil {
-			return fmt.Errorf("failed to create node %d: %w", i, err)
+			return fmt.Errorf("failed to create node %s: %w", nodeID, err)
 		}
+
+		fmt.Printf("  📝 Created concept: %s\n", conceptName)
 	}
 
 	fmt.Printf("✅ Loaded %d nodes\n", len(records)-1)
@@ -99,46 +156,70 @@ func loadNodes(ctx context.Context, driver neo4j.Driver, filename string) error 
 }
 
 func loadEdges(ctx context.Context, driver neo4j.Driver, filename string) error {
-	file, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+    file, err := os.Open(filename)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
 
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return err
-	}
+    reader := csv.NewReader(file)
+    records, err := reader.ReadAll()
+    if err != nil {
+        return err
+    }
 
-	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+    session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+    defer session.Close(ctx)
 
-	// Skip header row
-	for i, record := range records[1:] {
-		sourceID := record[0]
-		targetID := record[1]
-		relationshipType := record[2]
+    // Skip header row and process edges
+    for i, record := range records[1:] {
+        if len(record) < 3 {
+            return fmt.Errorf("invalid record at line %d: expected 3 columns, got %d", i+2, len(record))
+        }
 
-		_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-			query := `
-				MATCH (source:Concept {id: $sourceId})
-				MATCH (target:Concept {id: $targetId})
-				CREATE (source)-[:PREREQUISITE_FOR {type: $relType}]->(target)
-			`
-			_, err := tx.Run(ctx, query, map[string]interface{}{
-				"sourceId": sourceID,
-				"targetId": targetID,
-				"relType":  relationshipType,
-			})
-			return nil, err
-		})
+        sourceID := strings.TrimSpace(record[0])
+        targetID := strings.TrimSpace(record[1])
+        relationshipType := strings.TrimSpace(record[2])
 
-		if err != nil {
-			return fmt.Errorf("failed to create edge %d: %w", i, err)
-		}
-	}
+        _, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+            query := `
+                MATCH (source:Concept {id: $sourceId})
+                MATCH (target:Concept {id: $targetId})
+                CREATE (source)-[:PREREQUISITE_FOR {
+                    type: $relType,
+                    created_at: datetime()
+                }]->(target)
+            `
+            result, err := tx.Run(ctx, query, map[string]interface{}{
+                "sourceId": sourceID,
+                "targetId": targetID,
+                "relType":  relationshipType,
+            })
 
-	fmt.Printf("✅ Loaded %d edges\n", len(records)-1)
-	return nil
+            if err != nil {
+                return nil, err
+            }
+
+            // Check if both nodes were found - handle both return values
+            summary, err := result.Consume(ctx) // ✅ Handle both return values
+            if err != nil {
+                return nil, err
+            }
+
+            if summary.Counters().RelationshipsCreated() == 0 {
+                return nil, fmt.Errorf("could not find source '%s' or target '%s' concepts", sourceID, targetID)
+            }
+
+            return nil, nil
+        })
+
+        if err != nil {
+            return fmt.Errorf("failed to create relationship %s -> %s: %w", sourceID, targetID, err)
+        }
+
+        fmt.Printf("  🔗 Created relationship: %s -> %s\n", sourceID, targetID)
+    }
+
+    fmt.Printf("✅ Loaded %d edges\n", len(records)-1)
+    return nil
 }

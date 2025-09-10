@@ -1,24 +1,33 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mathprereq/internal/api/models"
 	"github.com/mathprereq/internal/core/orchestrator"
+	"github.com/mathprereq/internal/data/mongodb"
+	"github.com/mathprereq/internal/data/scraper"
 	"go.uber.org/zap"
 )
 
 type Handlers struct {
 	orchestrator *orchestrator.Orchestrator
+	mongoClient  *mongodb.Client
+	webScraper   *scraper.EducationalWebScraper
 	logger       *zap.Logger
 	startTime    time.Time
 }
 
-func New(orch *orchestrator.Orchestrator, logger *zap.Logger) *Handlers {
+func New(orch *orchestrator.Orchestrator, mongoClient *mongodb.Client, webScraper *scraper.EducationalWebScraper, logger *zap.Logger) *Handlers {
 	return &Handlers{
 		orchestrator: orch,
+		mongoClient:  mongoClient,
+		webScraper:   webScraper,
 		logger:       logger,
 		startTime:    time.Now(),
 	}
@@ -30,11 +39,14 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 	var req models.QueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Warn("Invalid request", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   err.Error(),
+			"success": false,
+		})
 		return
 	}
 
-	h.logger.Info("Processing query", zap.String("question", req.Question[:min(len(req.Question), 100)]))
+	h.logger.Info("Processing query", zap.String("query", req.Question[:min(len(req.Question), 100)]))
 
 	result, err := h.orchestrator.ProcessQuery(c.Request.Context(), req.Question)
 	processingTime := time.Since(start)
@@ -52,7 +64,9 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 			ProcessingTime:     processingTime,
 			ErrorMessage:       &errorMsg,
 		}
-		c.JSON(http.StatusOK, response)
+
+		h.logger.Info("Returning error response", zap.Any("response", response))
+		c.JSON(http.StatusOK, response) // Keep 200 status for frontend compatibility
 		return
 	}
 
@@ -81,7 +95,24 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 		ProcessingTime:   processingTime,
 	}
 
-	h.logger.Info("Query processed successfully", zap.Duration("processing_time", processingTime))
+	h.logger.Info("Query processed successfully",
+		zap.Duration("processing_time", processingTime),
+		zap.Int("concepts", len(result.IdentifiedConcepts)),
+		zap.Int("path_length", len(result.PrerequisitePath)),
+		zap.Int("context_chunks", len(result.RetrievedContext)),
+		zap.Int("explanation_length", len(result.Explanation)),
+		zap.Bool("explanation_complete", len(result.Explanation) > 500 && (result.Explanation[len(result.Explanation)-1] == '.' || result.Explanation[len(result.Explanation)-1] == '!')))
+
+	// Add response headers for better frontend handling
+	c.Header("Content-Type", "application/json")
+	c.Header("X-Processing-Time", processingTime.String())
+	c.Header("X-Explanation-Length", fmt.Sprintf("%d", len(result.Explanation)))
+
+	// Add warning header if explanation might be incomplete
+	if len(result.Explanation) < 500 {
+		c.Header("X-Response-Warning", "explanation-may-be-incomplete")
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -155,6 +186,15 @@ func (h *Handlers) ListConcepts(c *gin.Context) {
 		return
 	}
 
+	h.logger.Info("Retrieved concepts for listing", zap.Int("total_concepts", len(concepts)))
+	for i, concept := range concepts {
+		if i < 5 { // Log first 5 for debugging
+			h.logger.Info("Concept in database",
+				zap.String("id", concept.ID),
+				zap.String("name", concept.Name))
+		}
+	}
+
 	response := make([]models.ConceptInfo, len(concepts))
 	for i, concept := range concepts {
 		response[i] = models.ConceptInfo{
@@ -168,36 +208,172 @@ func (h *Handlers) ListConcepts(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// In your handlers.go, around line 190
 func (h *Handlers) HealthCheck(c *gin.Context) {
-	uptime := time.Since(h.startTime).String()
+	ctx := c.Request.Context()
 
-	// Check system health
-	kgHealthy := h.orchestrator.IsKnowledgeGraphHealthy(c.Request.Context())
-	vsHealthy := h.orchestrator.IsVectorStoreHealthy(c.Request.Context())
-
-	status := "healthy"
-	if !kgHealthy || !vsHealthy {
-		status = "unhealthy"
+	// Get system stats
+	stats, err := h.orchestrator.GetSystemStats(ctx)
+	if err != nil {
+		h.logger.Error("Failed to get system stats", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "error",
+			"error":  "Failed to retrieve system statistics",
+		})
+		return
 	}
 
-	stats, _ := h.orchestrator.GetSystemStats(c.Request.Context())
-
-	response := models.HealthResponse{
-		Status:               status,
-		Service:              "math-learning-framework",
-		KnowledgeGraphLoaded: kgHealthy,
-		VectorStoreLoaded:    vsHealthy,
-		TotalConcepts:        stats.TotalConcepts,
-		TotalChunks:          stats.TotalChunks,
-		Uptime:               uptime,
+	// Check if this is a detailed health check
+	if c.Request.URL.Path == "/api/v1/health-detailed" {
+		c.JSON(http.StatusOK, gin.H{
+			"status":          "healthy",
+			"timestamp":       time.Now().UTC(),
+			"version":         "1.0.0",
+			"total_concepts":  stats.TotalConcepts, // Keep as int64
+			"total_chunks":    stats.TotalChunks,   // Keep as int64
+			"total_edges":     stats.TotalEdges,    // Keep as int64
+			"knowledge_graph": stats.KnowledgeGraph,
+			"vector_store":    stats.VectorStore,
+			"llm_provider":    stats.LLMProvider,
+			"system_health":   stats.SystemHealth,
+		})
+		return
 	}
 
-	c.JSON(http.StatusOK, response)
+	// Simple health check
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "healthy",
+		"timestamp": time.Now().UTC(),
+	})
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// ScrapeAndGetLearningResources - Simple endpoint to scrape and return learning resources
+func (h *Handlers) ScrapeAndGetLearningResources(c *gin.Context) {
+	start := time.Now()
+
+	var req struct {
+		ConceptName string `json:"concept_name" binding:"required"`
+		Limit       int    `json:"limit,omitempty"`
 	}
-	return b
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("Invalid learning resources request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	if req.Limit == 0 {
+		req.Limit = 5 // Default limit
+	}
+
+	h.logger.Info("Scraping learning resources",
+		zap.String("concept_name", req.ConceptName),
+		zap.Int("limit", req.Limit))
+
+	// Check if scraper is available
+	if h.webScraper == nil {
+		h.logger.Error("Web scraper not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Web scraper service is not available",
+		})
+		return
+	}
+
+	// First try to get existing resources
+	conceptID := generateConceptID(req.ConceptName)
+	existingResources, err := h.webScraper.GetResourcesForConcept(c.Request.Context(), conceptID, req.Limit)
+
+	if err != nil || len(existingResources) == 0 {
+		// No existing resources, trigger scraping
+		h.logger.Info("No existing resources found, triggering scraping",
+			zap.String("concept", req.ConceptName))
+
+		err = h.webScraper.ScrapeResourcesForConcepts(c.Request.Context(), []string{req.ConceptName})
+		if err != nil {
+			h.logger.Error("Failed to scrape resources", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "Failed to scrape resources: " + err.Error(),
+			})
+			return
+		}
+
+		// Get resources after scraping
+		existingResources, err = h.webScraper.GetResourcesForConcept(c.Request.Context(), conceptID, req.Limit)
+		if err != nil {
+			h.logger.Error("Failed to retrieve scraped resources", zap.Error(err))
+		}
+	}
+
+	processingTime := time.Since(start)
+
+	h.logger.Info("Learning resources request completed",
+		zap.String("concept_name", req.ConceptName),
+		zap.Int("resources_found", len(existingResources)),
+		zap.Duration("processing_time", processingTime))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":         true,
+		"concept_name":    req.ConceptName,
+		"concept_id":      conceptID,
+		"total_resources": len(existingResources),
+		"resources":       existingResources,
+		"processing_time": processingTime.String(),
+	})
+}
+
+// GetQueryAnalytics returns query analytics data
+func (h *Handlers) GetQueryAnalytics(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	// Get query statistics
+	stats, err := h.orchestrator.GetQueryStats(ctx)
+	if err != nil {
+		h.logger.Error("Failed to get query stats", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve query analytics",
+		})
+		return
+	}
+
+	// Get popular concepts
+	popularConcepts, err := h.orchestrator.GetPopularConcepts(ctx, 10)
+	if err != nil {
+		h.logger.Warn("Failed to get popular concepts", zap.Error(err))
+		popularConcepts = []map[string]interface{}{}
+	}
+
+	// Get query trends for the last 7 days
+	queryTrends, err := h.orchestrator.GetQueryTrends(ctx, 7)
+	if err != nil {
+		h.logger.Warn("Failed to get query trends", zap.Error(err))
+		queryTrends = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"stats":            stats,
+		"popular_concepts": popularConcepts,
+		"query_trends":     queryTrends,
+	})
+}
+
+// Helper function to generate concept ID
+func generateConceptID(conceptName string) string {
+	// Simple concept ID generation
+	id := strings.ToLower(conceptName)
+	id = strings.ReplaceAll(id, " ", "_")
+	id = strings.ReplaceAll(id, "-", "_")
+	// Remove any non-alphanumeric characters except underscore
+	var result strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }

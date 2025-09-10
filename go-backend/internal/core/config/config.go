@@ -1,6 +1,12 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/mathprereq/internal/data/mongodb"
+	"github.com/spf13/viper"
+)
 
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
@@ -8,6 +14,7 @@ type Config struct {
 	Weaviate WeaviateConfig `mapstructure:"weaviate"`
 	LLM      LLMConfig      `mapstructure:"llm"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
+	MongoDB  mongodb.Config `yaml:"mongodb"`
 }
 
 type ServerConfig struct {
@@ -27,19 +34,19 @@ type Neo4jConfig struct {
 }
 
 type WeaviateConfig struct {
-	Host   string `mapstructure:"host"`
-	Scheme string `mapstructure:"scheme"`
-	Class  string `mapstructure:"class"`
-	ProjectID string `env:"GOOGLE_PROJECT_ID"`
-
+	Host   string `yaml:"host" env:"WEAVIATE_HOST"`
+	Scheme string `yaml:"scheme" env:"WEAVIATE_SCHEME"`
+	Class  string `yaml:"class" env:"WEAVIATE_CLASS"`
+	APIKey string `yaml:"api_key,omitempty" env:"WEAVIATE_API_KEY"`
 }
 
 type LLMConfig struct {
-    Provider      string `env:"MLF_LLM_PROVIDER" envDefault:"gemini"`
-    APIKey        string `env:"MLF_LLM_API_KEY"`
-    Model         string `env:"MLF_LLM_MODEL" envDefault:"gemini-2.5-flash"`
-    MaxTokens     int    `env:"MLF_LLM_MAX_TOKENS" envDefault:"2048"`
-    RetryAttempts int    `env:"MLF_LLM_RETRY_ATTEMPTS" envDefault:"3"`
+	Provider      string  `yaml:"provider" env:"MLF_LLM_PROVIDER" env-default:"gemini"`
+	Model         string  `yaml:"model" env:"MLF_LLM_MODEL" env-default:"gemini-2.0-flash-exp"`
+	APIKey        string  `yaml:"api_key" env:"MLF_LLM_API_KEY"`
+	MaxTokens     int     `yaml:"max_tokens" env:"MLF_LLM_MAX_TOKENS" env-default:"8192"`
+	Temperature   float32 `yaml:"temperature" env:"MLF_LLM_TEMPERATURE" env-default:"0.3"`
+	RetryAttempts int     `yaml:"retry_attempts" env:"MLF_LLM_RETRY_ATTEMPTS" env-default:"3"`
 }
 
 type LoggingConfig struct {
@@ -48,51 +55,82 @@ type LoggingConfig struct {
 }
 
 func Load() (*Config, error) {
+	cfg := &Config{}
+
+	// Load from file first
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
-	viper.AddConfigPath("./config")
-
-	// Environment variables
-	viper.AutomaticEnv()
-	viper.SetEnvPrefix("MLF")
-
-	// set defaultes
-	setDefaults()
 
 	if err := viper.ReadInConfig(); err != nil {
-		return nil, err
+		// Config file is optional
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
+	} else {
+		fmt.Printf("Using config file: %s\n", viper.ConfigFileUsed())
 	}
 
-	var config Config
-	if err := viper.Unmarshal(&config); err != nil {
-		return nil, err
+	// Enable environment variable support
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Set defaults
+	setDefaults()
+
+	if err := viper.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	return &config, nil
+
+	return cfg, nil
 }
 
 func setDefaults() {
+	// Server defaults
 	viper.SetDefault("server.port", 8000)
-	viper.SetDefault("server.host", "localhost")
+	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.read_timeout", 30)
 	viper.SetDefault("server.write_timeout", 30)
 	viper.SetDefault("server.max_header_bytes", 1048576)
 
+	// Neo4j defaults
 	viper.SetDefault("neo4j.uri", "bolt://localhost:7687")
 	viper.SetDefault("neo4j.username", "neo4j")
-	viper.SetDefault("neo4j.password", "password")
+	viper.SetDefault("neo4j.password", "password123")
 	viper.SetDefault("neo4j.database", "neo4j")
 
+	// Weaviate defaults
 	viper.SetDefault("weaviate.host", "localhost:8080")
 	viper.SetDefault("weaviate.scheme", "http")
 	viper.SetDefault("weaviate.class", "CalculusContent")
+	viper.SetDefault("weaviate.project_id", "mathprereq")
 
-	viper.SetDefault("llm.provider", "openai")
-	viper.SetDefault("llm.model", "gpt-4o-mini")
-	viper.SetDefault("llm.temperature", 0.1)
-	viper.SetDefault("llm.max_tokens", 2000)
+	// LLM defaults
+	viper.SetDefault("llm.provider", "gemini")
+	viper.SetDefault("llm.model", "gemini-2.0-flash-exp")
+	viper.SetDefault("llm.max_tokens", 2048)
 	viper.SetDefault("llm.retry_attempts", 3)
 
+	// Logging defaults
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.format", "json")
+
+	// MongoDB defaults
+	viper.SetDefault("mongodb.uri", "mongodb://localhost:27017")
+	viper.SetDefault("mongodb.database", "mydatabase")
+	viper.SetDefault("mongodb.username", "myuser")
+	viper.SetDefault("mongodb.password", "mypassword")
+}
+
+func validateConfig(config *Config) error {
+	// Validate required fields
+	if config.Neo4j.URI == "" {
+		return fmt.Errorf("Neo4j URI is required")
+	}
+
+	if config.LLM.APIKey == "" {
+		fmt.Println("Warning: LLM API key is not set")
+	}
+
+	return nil
 }

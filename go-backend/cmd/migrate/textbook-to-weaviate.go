@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -16,25 +15,38 @@ import (
 func runTextbookToWeaviateMigration() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	client, err := weaviate.NewClient(cfg.Weaviate)
 	if err != nil {
-		log.Fatal("Failed to create Weaviate client:", err)
+		return fmt.Errorf("failed to create Weaviate client: %w", err)
 	}
 
 	ctx := context.Background()
 
+	// Check if data already exists
+	stats, err := client.GetStats(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check existing data: %w", err)
+	}
+
+	if totalChunks, ok := stats["total_chunks"].(int64); ok && totalChunks > 0 {
+		fmt.Printf("⚠️  Found %d existing chunks. Cleaning and reloading...\n", totalChunks)
+		if err := client.DeleteAll(ctx); err != nil {
+			return fmt.Errorf("failed to clear existing data: %w", err)
+		}
+	}
+
 	// Load textbook content
 	content, err := loadTextbookContent("data/raw/calculus_textbook.txt")
 	if err != nil {
-		log.Fatal("Failed to load textbook content:", err)
+		return fmt.Errorf("failed to load textbook content: %w", err)
 	}
 
 	// Add content to Weaviate
 	if err := client.AddContent(ctx, content); err != nil {
-		log.Fatal("Failed to add content to Weaviate:", err)
+		return fmt.Errorf("failed to add content to Weaviate: %w", err)
 	}
 
 	fmt.Printf("✅ Successfully migrated %d chunks to Weaviate\n", len(content))
@@ -54,6 +66,15 @@ func loadTextbookContent(filename string) ([]weaviate.ContentChunk, error) {
 	var currentChapter string
 	var currentConcept string
 	chunkIndex := 0
+
+	// Create proper Source struct
+	textbookSource := weaviate.Source{
+		Document: "calculus_textbook",
+		Title:    "Calculus Textbook",
+		Author:   "Mathematics Department",
+		URL:      "",
+		Page:     1,
+	}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -83,7 +104,7 @@ func loadTextbookContent(filename string) ([]weaviate.ContentChunk, error) {
 				Content:    line,
 				Concept:    currentConcept,
 				Chapter:    currentChapter,
-				Source:     "calculus_textbook",
+				Source:     textbookSource, // Use Source struct
 				ChunkIndex: chunkIndex,
 			}
 			chunks = append(chunks, chunk)

@@ -3,22 +3,21 @@ package llm
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
-	"time"
 
 	"github.com/mathprereq/internal/core/config"
 	"github.com/mathprereq/internal/data/neo4j"
 	"github.com/mathprereq/pkg/logger"
-	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/googleai"
-	"github.com/tmc/langchaingo/llms/openai"
 	"go.uber.org/zap"
+	"google.golang.org/genai"
 )
 
 type Client struct {
-	llm    llms.Model
-	config config.LLMConfig
-	logger *zap.Logger
+	genaiClient *genai.Client
+	config      config.LLMConfig
+	logger      *zap.Logger
+	provider    string
 }
 
 type ExplanationRequest struct {
@@ -28,44 +27,65 @@ type ExplanationRequest struct {
 }
 
 func NewClient(cfg config.LLMConfig) *Client {
-    logger := logger.MustGetLogger()
+	logger := logger.MustGetLogger()
+	logger.Info("Initializing LLM client",
+		zap.String("provider", cfg.Provider),
+		zap.String("model", cfg.Model),
+		zap.Bool("api_key_provided", cfg.APIKey != ""))
 
-    var llm llms.Model
-    var err error
+	var genaiClient *genai.Client
+	var err error
+	ctx := context.Background()
 
-    ctx := context.Background() // Add context
+	switch cfg.Provider {
+	case "gemini", "googleai":
+		apiKey := cfg.APIKey
+		if apiKey == "" {
+			apiKey = os.Getenv("GEMINI_API_KEY")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("GOOGLE_API_KEY")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("MLF_LLM_API_KEY")
+		}
+		if apiKey == "" {
+			logger.Fatal("Gemini API key not found",
+				zap.String("provider", cfg.Provider),
+				zap.String("suggestion", "Set GEMINI_API_KEY, GOOGLE_API_KEY, or MLF_LLM_API_KEY environment variable"))
+		}
 
-    switch cfg.Provider {
-    case "gemini", "googleai":
-        llm, err = googleai.New(
-            ctx,
-            googleai.WithAPIKey(cfg.APIKey),
-            googleai.WithDefaultModel(cfg.Model),
-        )
-        if err != nil {
-            logger.Fatal("Failed to initialize Gemini client", zap.Error(err))
-        }
-        logger.Info("Initialized Gemini LLM client", zap.String("model", cfg.Model))
+		clientConfig := &genai.ClientConfig{
+			APIKey: apiKey,
+		}
+		genaiClient, err = genai.NewClient(ctx, clientConfig)
+		if err != nil {
+			logger.Fatal("Failed to initialize Gemini GenAI client", zap.Error(err))
+		}
+		logger.Info("Initialized Gemini GenAI client", zap.String("model", cfg.Model))
 
-    case "openai":
-        llm, err = openai.New(
-            openai.WithToken(cfg.APIKey),
-            openai.WithModel(cfg.Model),
-        )
-        if err != nil {
-            logger.Fatal("Failed to initialize OpenAI client", zap.Error(err))
-        }
-        logger.Info("Initialized OpenAI LLM client", zap.String("model", cfg.Model))
+	default:
+		logger.Fatal("Unsupported LLM provider", zap.String("provider", cfg.Provider))
+	}
 
-    default:
-        logger.Fatal("Unsupported LLM provider", zap.String("provider", cfg.Provider))
-    }
+	return &Client{
+		genaiClient: genaiClient,
+		config:      cfg,
+		logger:      logger,
+		provider:    cfg.Provider,
+	}
+}
 
-    return &Client{
-        llm:    llm,
-        config: cfg,
-        logger: logger,
-    }
+func (c *Client) GetProvider() string {
+	return c.provider
+}
+
+func (c *Client) GetModel() string {
+	return c.config.Model
+}
+
+func (c *Client) GetConfig() config.LLMConfig {
+	return c.config
 }
 
 func (c *Client) IdentifyConcepts(ctx context.Context, query string) ([]string, error) {
@@ -128,27 +148,34 @@ func (c *Client) GenerateExplanation(ctx context.Context, req ExplanationRequest
 		contextText = strings.Join(contextParts, "\n\n")
 	}
 
-	systemPrompt := `You are an expert mathematics tutor specializing in calculus. Your goal is to provide clear, educational explanations that help students understand mathematical concepts and their prerequisites.
+	systemPrompt := `You are an expert mathematics tutor specializing in calculus. Your goal is to provide clear, complete, educational explanations that help students understand mathematical concepts and their prerequisites.
 
 	Guidelines:
 	1. Start with the fundamental concepts and build up logically
 	2. Explain WHY prerequisites are needed, not just WHAT they are
 	3. Use clear, accessible language but maintain mathematical accuracy
-	4. Include specific examples when helpful
+	4. Include specific step-by-step solutions with calculations
 	5. Address the student's specific question directly
-	6. Keep explanations focused and not too lengthy
-	7. Use the provided context and learning path to ground your explanation`
+	6. Always provide a COMPLETE explanation - do not truncate your response
+	7. Use the provided context and learning path to ground your explanation
+	8. End with a clear conclusion or final answer
+
+	IMPORTANT: Provide a complete, thorough explanation. Do not stop mid-sentence or leave the explanation incomplete.`
 
 	userPrompt := fmt.Sprintf(`Student Question: %s
 
 	%sRelevant Course Material:
 	%s
 
-	Please provide a clear, educational explanation that:
+	Please provide a complete, educational explanation that:
 	1. Addresses the student's question directly
 	2. Explains any necessary prerequisite concepts
-	3. Shows how the concepts connect to each other
-	4. Provides practical guidance for learning
+	3. Shows step-by-step solution with calculations
+	4. Shows how the concepts connect to each other
+	5. Provides the final numerical answer if applicable
+	6. Includes practical guidance for learning
+
+	Make sure to provide a COMPLETE response that fully answers the question.
 
 	Explanation:`, req.Query, pathText, contextText)
 
@@ -157,69 +184,99 @@ func (c *Client) GenerateExplanation(ctx context.Context, req ExplanationRequest
 		return "", fmt.Errorf("failed to generate explanation: %w", err)
 	}
 
-	c.logger.Info("Generated explanation successfully")
+	c.logger.Info("Generated explanation successfully",
+		zap.Int("explanation_length", len(response)),
+		zap.Bool("appears_complete", !c.isResponseTruncated(response)))
+
 	return response, nil
 }
 
 func (c *Client) callLLM(ctx context.Context, systemPrompt, userPrompt string, temperature float32) (string, error) {
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	// Retry logic
-	var lastErr error
-	for attempt := 0; attempt < c.config.RetryAttempts; attempt++ {
-		if attempt > 0 {
-			c.logger.Info("Retrying LLM call",
-				zap.Int("attempt", attempt+1),
-				zap.String("provider", c.config.Provider))
-			time.Sleep(time.Duration(attempt) * time.Second)
-		}
-
-		messages := []llms.MessageContent{
-			llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
-			llms.TextParts(llms.ChatMessageTypeHuman, userPrompt),
-		}
-
-		// Configure options based on provider
-		var options []llms.CallOption
-		options = append(options, llms.WithTemperature(float64(temperature)))
-
-		// Gemini has different token limits than OpenAI
-		if c.config.Provider == "gemini" || c.config.Provider == "googleai" {
-			// Gemini models have higher token limits
-			maxTokens := c.config.MaxTokens
-			if maxTokens == 0 {
-				maxTokens = 8192 // Default for Gemini
-			}
-			options = append(options, llms.WithMaxTokens(maxTokens))
-		} else {
-			options = append(options, llms.WithMaxTokens(c.config.MaxTokens))
-		}
-
-		response, err := c.llm.GenerateContent(ctx, messages, options...)
-
-		if err != nil {
-			lastErr = err
-			c.logger.Warn("LLM call failed",
-				zap.Error(err),
-				zap.Int("attempt", attempt+1),
-				zap.String("provider", c.config.Provider))
-			continue
-		}
-
-		if len(response.Choices) == 0 {
-			lastErr = fmt.Errorf("no response choices returned")
-			continue
-		}
-
-		c.logger.Debug("LLM call successful",
-			zap.String("provider", c.config.Provider),
-			zap.String("model", c.config.Model),
-			zap.Int("response_length", len(response.Choices[0].Content)))
-
-		return response.Choices[0].Content, nil
+	// Gemini/GenAI logic using the correct API
+	model := c.config.Model
+	if model == "" {
+		model = "gemini-2.0-flash-exp" // fallback
 	}
 
-	return "", fmt.Errorf("LLM call failed after %d attempts: %w", c.config.RetryAttempts, lastErr)
+	// Create the full prompt combining system and user prompts
+	fullPrompt := systemPrompt + "\n\n" + userPrompt
+
+	// Create content using genai.Text
+	contents := genai.Text(fullPrompt)
+
+	// Create generation config
+	config := &genai.GenerateContentConfig{
+		Temperature:     &temperature,
+		MaxOutputTokens: int32(c.config.MaxTokens),
+	}
+
+	// Generate content with proper parameters
+	resp, err := c.genaiClient.Models.GenerateContent(ctx, model, contents, config)
+	if err != nil {
+		return "", fmt.Errorf("Gemini LLM call failed: %w", err)
+	}
+
+	// Extract response
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("No candidates returned from Gemini")
+	}
+
+	// Extract the text content
+	var content string
+	if resp.Candidates[0].Content != nil {
+		for _, part := range resp.Candidates[0].Content.Parts {
+			if part.Text != "" {
+				content += part.Text
+			}
+		}
+	}
+
+	if content == "" {
+		return "", fmt.Errorf("No text content in Gemini response")
+	}
+
+	return content, nil
+}
+
+func (c *Client) isResponseTruncated(response string) bool {
+	if len(response) == 0 {
+		return true
+	}
+
+	// Check if response ends abruptly without proper punctuation
+	lastChar := response[len(response)-1]
+	if lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != '\n' {
+		return true
+	}
+
+	// Check for common truncation patterns
+	truncationIndicators := []string{
+		" and their",
+		" is a",
+		" we can",
+		" the ",
+		" this ",
+	}
+
+	for _, indicator := range truncationIndicators {
+		if strings.HasSuffix(response, indicator) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

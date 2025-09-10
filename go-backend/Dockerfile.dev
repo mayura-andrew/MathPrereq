@@ -1,17 +1,17 @@
 FROM golang:alpine
 
-
 WORKDIR /app
 
-# Install air for hot reloading
-RUN go install github.com/cosmtrek/air@latest
+# Install air for hot reloading and dependencies
+RUN go install github.com/air-verse/air@latest && \
+    apk add --no-cache git ca-certificates curl
 
-# Install dependencies
-RUN apk add --no-cache git ca-certificates curl
-
-# Copy go mod files
+# Copy go mod files and download dependencies
 COPY go.mod go.sum ./
 RUN go mod download
+
+# Copy source code
+COPY . .
 
 EXPOSE 8000
 

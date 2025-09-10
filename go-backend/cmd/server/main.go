@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,9 +16,12 @@ import (
 	"github.com/mathprereq/internal/api/routes"
 	"github.com/mathprereq/internal/core/config"
 	"github.com/mathprereq/internal/core/orchestrator"
+	"github.com/mathprereq/internal/data/mongodb"
 	"github.com/mathprereq/internal/data/neo4j"
+	"github.com/mathprereq/internal/data/scraper"
 	"github.com/mathprereq/internal/data/weaviate"
 	"github.com/mathprereq/pkg/logger"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
 )
 
@@ -47,11 +51,92 @@ func main() {
 		zapLogger.Fatal("Failed to initialize Weaviate", zap.Error(err))
 	}
 
-	// Initialize orchestrator
-	orchestrator := orchestrator.New(neo4jClient, weaviateClient, cfg.LLM)
+	// Initialize MongoDB with proper error handling
+	mongoConfig := mongodb.Config{
+		URI:            getEnvString("MONGODB_URI", "mongodb://admin:password123@localhost:27017/mathprereq?authSource=admin"),
+		Database:       getEnvString("MONGODB_DATABASE", "mathprereq"),
+		ConnectTimeout: 10 * time.Second,
+		QueryTimeout:   30 * time.Second,
+	}
 
-	// Initialize handlers
-	handlers := handlers.New(orchestrator, zapLogger)
+	zapLogger.Info("Initializing MongoDB",
+		zap.String("database", mongoConfig.Database),
+		zap.String("uri", "mongodb://***:***@localhost:27017/mathprereq"))
+
+	mongoClient, err := mongodb.NewClient(mongoConfig)
+	if err != nil {
+		zapLogger.Fatal("Failed to initialize MongoDB", zap.Error(err))
+	}
+	defer func() {
+		if err := mongoClient.Close(context.Background()); err != nil {
+			zapLogger.Error("Error closing MongoDB client", zap.Error(err))
+		}
+	}()
+
+	// Test MongoDB connection with authentication verification
+	testCtx, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer testCancel()
+
+	if err := mongoClient.Ping(testCtx); err != nil {
+		zapLogger.Fatal("Failed to ping MongoDB", zap.Error(err))
+	}
+	zapLogger.Info("MongoDB connection verified successfully")
+
+	// Additional authentication test - try a simple database operation
+	testDB := mongoClient.GetMongoClient().Database(mongoConfig.Database)
+	collections, err := testDB.ListCollectionNames(testCtx, bson.M{})
+	if err != nil {
+		zapLogger.Warn("MongoDB authentication test failed - collections list", zap.Error(err))
+	} else {
+		zapLogger.Info("MongoDB authentication verified - can list collections", zap.Int("collections", len(collections)))
+	}
+
+	// Initialize web scraper (integrated into main server)
+	var webScraper *scraper.EducationalWebScraper
+	if mongoClient != nil {
+		// Initialize web scraper configuration with the correct authenticated URI
+		scraperConfig := scraper.ScraperConfig{
+			MaxConcurrentRequests: getEnvInt("SCRAPER_MAX_CONCURRENT", 8),
+			RequestTimeout:        time.Duration(getEnvInt("SCRAPER_TIMEOUT_SECONDS", 30)) * time.Second,
+			RateLimit:             getEnvFloat("SCRAPER_RATE_LIMIT", 3.0),
+			UserAgent:             getEnvString("SCRAPER_USER_AGENT", "MathPrereqBot/1.0 (+https://mathprereq.com/bot)"),
+			MongoURI:              mongoConfig.URI, // Pass the authenticated URI
+			DatabaseName:          mongoConfig.Database,
+			CollectionName:        getEnvString("SCRAPER_COLLECTION", "educational_resources"),
+			MaxRetries:            3,
+			RetryDelay:            2 * time.Second,
+		}
+
+		// Create scraper with shared client but also pass the authenticated URI
+		webScraper, err = scraper.New(scraperConfig, mongoClient.GetMongoClient())
+		if err != nil {
+			zapLogger.Warn("Failed to initialize web scraper, continuing without scraping features", zap.Error(err))
+			webScraper = nil
+		} else {
+			zapLogger.Info("Web scraper initialized successfully with shared MongoDB client")
+
+			// Test the scraper's MongoDB connection
+			testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer testCancel()
+
+			// Test if scraper can access MongoDB
+			testCollection := mongoClient.GetMongoClient().Database(scraperConfig.DatabaseName).Collection(scraperConfig.CollectionName)
+			count, err := testCollection.CountDocuments(testCtx, bson.M{})
+			if err != nil {
+				zapLogger.Warn("Scraper MongoDB test failed - cannot count documents", zap.Error(err))
+			} else {
+				zapLogger.Info("Scraper MongoDB test passed - can access collection", zap.Int64("documents", count))
+			}
+		}
+	} else {
+		zapLogger.Warn("MongoDB client not available, skipping web scraper initialization")
+	}
+
+	// Initialize orchestrator
+	orchestrator := orchestrator.New(neo4jClient, weaviateClient, cfg.LLM, mongoClient.GetMongoClient(), mongoConfig.Database)
+
+	// Initialize handlers with MongoDB client and web scraper
+	handlers := handlers.New(orchestrator, mongoClient, webScraper, zapLogger)
 
 	// Setup router
 	router := gin.New()
@@ -87,4 +172,30 @@ func main() {
 	}
 
 	zapLogger.Info("Server exited")
+}
+
+// Helper functions
+func getEnvString(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

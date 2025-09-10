@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,10 +40,18 @@ func Logger() gin.HandlerFunc {
 			path = path + "?" + raw
 		}
 
-		requestID, _ := c.Get("request_id")
+		// Safe request ID extraction
+		var requestIDStr string
+		if requestID, exists := c.Get("request_id"); exists && requestID != nil {
+			if idStr, ok := requestID.(string); ok {
+				requestIDStr = idStr
+			} else {
+				requestIDStr = fmt.Sprintf("%v", requestID)
+			}
+		}
 
 		logger.Info("HTTP Request",
-			zap.String("request_id", requestID.(string)),
+			zap.String("request_id", requestIDStr),
 			zap.String("method", method),
 			zap.String("path", path),
 			zap.Int("status", statusCode),
@@ -50,4 +60,10 @@ func Logger() gin.HandlerFunc {
 			zap.Int("body_size", bodySize),
 		)
 	}
+}
+
+// Helper function to generate request ID
+func generateRequestID() string {
+	// Generate a simple UUID-like string
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Intn(10000))
 }

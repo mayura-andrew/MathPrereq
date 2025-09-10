@@ -58,10 +58,6 @@ func NewClient(cfg config.Neo4jConfig) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Close() error {
-	return c.driver.Close(context.Background())
-}
-
 func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string, error) {
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
@@ -100,6 +96,45 @@ func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string
 
 	return result.(*string), nil
 }
+
+// func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string, error) {
+// 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+// 	defer session.Close(ctx)
+
+// 	query := `
+// 		MATCH (c:Concept)
+// 		WHERE toLower(c.name) CONTAINS toLower($conceptName)
+// 		   OR toLower(c.id) = toLower($conceptName)
+// 		RETURN c.id as id
+// 		LIMIT 1
+// 	`
+// 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+// 		record, err := tx.Run(ctx, query, map[string]interface{}{
+// 			"conceptName": conceptName,
+// 		})
+// 		if err != nil {
+// 			return nil, err
+// 		}
+
+// 		if record.Next(ctx) {
+// 			id, _ := record.Record().Get("id")
+// 			idStr := id.(string)
+// 			return &idStr, nil
+// 		}
+
+// 		return nil, nil
+// 	})
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to find concept ID: %w", err)
+// 	}
+
+// 	if result == nil {
+// 		return nil, nil
+// 	}
+
+// 	return result.(*string), nil
+// }
 
 func (c *Client) FindPrerequisitePath(ctx context.Context, targetConcepts []string) ([]Concept, error) {
 	if len(targetConcepts) == 0 {
@@ -181,8 +216,10 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 
+	// Modified query to handle both ID and name lookups
 	query := `
-		MATCH (c:Concept {id: $conceptId})
+		MATCH (c:Concept)
+		WHERE c.id = $conceptId OR c.name = $conceptId
 		OPTIONAL MATCH (prereq:Concept)-[:PREREQUISITE_FOR]->(c)
 		OPTIONAL MATCH (c)-[:PREREQUISITE_FOR]->(next:Concept)
 		RETURN c.id as id, c.name as name, c.description as description,
@@ -199,11 +236,15 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 		}
 
 		if !record.Next(ctx) {
+			// Log what we were looking for and suggest alternatives
+			c.logger.Warn("Concept not found",
+				zap.String("search_term", conceptID),
+				zap.String("suggestion", "Try searching by concept ID (e.g., 'func_basics') or exact name"))
 			return nil, fmt.Errorf("concept not found: %s", conceptID)
 		}
 
 		rec := record.Record()
-		
+
 		id, _ := rec.Get("id")
 		name, _ := rec.Get("name")
 		description, _ := rec.Get("description")
@@ -263,7 +304,6 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 	return result.(*ConceptDetailResult), nil
 }
 
-
 func (c *Client) GetAllConcepts(ctx context.Context) ([]Concept, error) {
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
@@ -283,7 +323,7 @@ func (c *Client) GetAllConcepts(ctx context.Context) ([]Concept, error) {
 		var concepts []Concept
 		for records.Next(ctx) {
 			record := records.Record()
-			
+
 			id, _ := record.Get("id")
 			name, _ := record.Get("name")
 			description, _ := record.Get("description")
@@ -345,13 +385,13 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 			relationshipCount, _ := rec.Get("relationshipCount")
 
 			return map[string]interface{}{
-				"total_concepts":     conceptCount,
+				"total_concepts":      conceptCount,
 				"total_relationships": relationshipCount,
 			}, nil
 		}
 
 		return map[string]interface{}{
-			"total_concepts":     0,
+			"total_concepts":      0,
 			"total_relationships": 0,
 		}, nil
 	})
@@ -361,4 +401,8 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 	}
 
 	return result.(map[string]interface{}), nil
+}
+
+func (c *Client) Close() error {
+	return c.driver.Close(context.Background())
 }

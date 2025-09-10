@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # Neo4j Knowledge Graph
@@ -7,49 +7,55 @@ services:
     container_name: math-learning-neo4j
     environment:
       NEO4J_AUTH: neo4j/password123
-      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
-      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+      # NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      # NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
       NEO4J_dbms_memory_heap_initial__size: 512M
       NEO4J_dbms_memory_heap_max__size: 1G
       NEO4J_dbms_memory_pagecache_size: 256M
     ports:
-      - "7474:7474"   # HTTP
-      - "7687:7687"   # Bolt
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
       - neo4j_plugins:/plugins
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p password123 'RETURN 1'"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
     networks:
       - math-learning
 
   # Weaviate Vector Database
   weaviate:
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --scheme
+      - http
     image: semitechnologies/weaviate:1.22.4
-    container_name: math-learning-weaviate
-    environment:
-      QUERY_DEFAULTS_LIMIT: 25
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
-      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
-      DEFAULT_VECTORIZER_MODULE: 'text2vec-google'
-      ENABLE_MODULES: 'text2vec-google,generative-google'
-      OPENAI_APIKEY: ${GOOGLE_API_KEY:-}
-      CLUSTER_HOSTNAME: 'node1'
     ports:
       - "8080:8080"
+    restart: on-failure:0
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "text2vec-transformers"
+      ENABLE_MODULES: "text2vec-transformers"
+      TRANSFORMERS_INFERENCE_API: "http://t2v-transformers:8080"
+      CLUSTER_HOSTNAME: "node1"
     volumes:
       - weaviate_data:/var/lib/weaviate
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - math-learning
+  t2v-transformers:
+    image: semitechnologies/transformers-inference:sentence-transformers-multi-qa-MiniLM-L6-cos-v1
+    environment:
+      ENABLE_CUDA: "0"
 
   # Redis Cache (optional for production)
   redis:
@@ -63,6 +69,27 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
+      retries: 3
+    networks:
+      - math-learning
+
+  # MongoDB for Educational Resources
+  mongodb:
+    image: mongo:7.0
+    container_name: math-learning-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: mathprereq
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
       retries: 3
     networks:
       - math-learning
@@ -82,8 +109,13 @@ services:
       MLF_WEAVIATE_HOST: "weaviate:8080"
       MLF_WEAVIATE_SCHEME: "http"
       MLF_LLM_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_API_KEY: ${GOOGLE_API_KEY:-} # Add this line
       MLF_LLM_PROVIDER: "gemini"
       MLF_LLM_MODEL: "gemini-2.5-pro"
+      MLF_LLM_MAX_TOKENS: 2048
+      MLF_LOGGING_LEVEL: "info"
+      MONGODB_URI: "mongodb://admin:password123@mongodb:27017/mathprereq?authSource=admin"
     ports:
       - "8000:8000"
     depends_on:
@@ -92,6 +124,8 @@ services:
       weaviate:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
     volumes:
       - ./data:/app/data
@@ -109,6 +143,7 @@ volumes:
   neo4j_plugins:
   weaviate_data:
   redis_data:
+  mongodb_data:
 
 networks:
   math-learning:
