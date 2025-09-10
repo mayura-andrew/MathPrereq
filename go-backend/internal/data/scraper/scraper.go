@@ -336,7 +336,7 @@ func (s *EducationalWebScraper) normalizeConceptForSearch(concept string) string
 	// Remove extra spaces and normalize
 	normalized := strings.TrimSpace(concept)
 	normalized = regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")
-	
+
 	// Convert to title case for better search results
 	words := strings.Fields(strings.ToLower(normalized))
 	for i, word := range words {
@@ -345,31 +345,31 @@ func (s *EducationalWebScraper) normalizeConceptForSearch(concept string) string
 		}
 	}
 	normalized = strings.Join(words, " ")
-	
+
 	return normalized
 }
 
 // generateSearchTerms creates multiple search variations for better results
 func (s *EducationalWebScraper) generateSearchTerms(concept string) []string {
 	normalized := s.normalizeConceptForSearch(concept)
-	
+
 	terms := []string{
-		normalized,                           // "Basic Functions"
-		normalized + " mathematics",          // "Basic Functions mathematics"
-		normalized + " math tutorial",        // "Basic Functions math tutorial"
+		normalized,                    // "Basic Functions"
+		normalized + " mathematics",   // "Basic Functions mathematics"
+		normalized + " math tutorial", // "Basic Functions math tutorial"
 	}
-	
+
 	// Add variations for multi-word concepts
 	if strings.Contains(normalized, " ") {
 		// Remove common words that might confuse search
 		withoutCommon := regexp.MustCompile(`\b(Basic|Advanced|Elementary|Introduction|to|the|of|and|in)\b`).ReplaceAllString(normalized, "")
 		withoutCommon = regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(withoutCommon), " ")
-		
+
 		if withoutCommon != "" && withoutCommon != normalized {
 			terms = append(terms, withoutCommon)
 		}
 	}
-	
+
 	return terms
 }
 
@@ -506,15 +506,15 @@ func (s *EducationalWebScraper) searchYouTube(ctx context.Context, conceptID, co
 
 		// Create shorter timeout for individual searches
 		searchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		
+
 		searchURL := fmt.Sprintf("https://www.youtube.com/results?search_query=%s", url.QueryEscape(searchTerm))
 
 		resources, err := s.scrapeYouTubeResults(searchCtx, searchURL, conceptID, conceptName)
 		cancel()
 
 		if err != nil {
-			s.logger.Warn("YouTube search failed", 
-				zap.String("term", searchTerm), 
+			s.logger.Warn("YouTube search failed",
+				zap.String("term", searchTerm),
 				zap.Error(err))
 			continue
 		}
@@ -1210,29 +1210,13 @@ func (s *EducationalWebScraper) searchGeneralEducationSites(ctx context.Context,
 	return allResources, nil
 }
 
-// deduplicateResources removes duplicate resources
+// deduplicateResources removes duplicate resources based on URL
 func (s *EducationalWebScraper) deduplicateResources(resources []EducationalResource) []EducationalResource {
 	seen := make(map[string]bool)
 	var unique []EducationalResource
 
 	for _, resource := range resources {
-		// Use URL as primary deduplication key
-		if seen[resource.URL] {
-			continue
-		}
-
-		// Also check for similar titles
-		titleKey := strings.ToLower(strings.TrimSpace(resource.Title))
-		duplicate := false
-		for _, existing := range unique {
-			existingTitleKey := strings.ToLower(strings.TrimSpace(existing.Title))
-			if s.similarity(titleKey, existingTitleKey) > 0.8 {
-				duplicate = true
-				break
-			}
-		}
-
-		if !duplicate {
+		if !seen[resource.URL] {
 			seen[resource.URL] = true
 			unique = append(unique, resource)
 		}

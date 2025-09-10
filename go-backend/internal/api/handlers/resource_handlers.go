@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,6 +162,24 @@ func getRequestID(c *gin.Context) string {
 		return requestID
 	}
 	return "unknown"
+}
+
+// preprocessConceptName normalizes concept names for better processing
+func preprocessConceptName(concept string) string {
+	// Decode URL encoding
+	decoded, err := url.QueryUnescape(concept)
+	if err != nil {
+		decoded = concept // Fall back to original if decoding fails
+	}
+
+	// Normalize whitespace and formatting
+	normalized := regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(decoded), " ")
+
+	// Handle common formatting issues
+	normalized = strings.ReplaceAll(normalized, "_", " ")
+	normalized = strings.ReplaceAll(normalized, "-", " ")
+
+	return normalized
 }
 
 // FindResourcesForConcept handles POST /api/v1/resources/find/:concept

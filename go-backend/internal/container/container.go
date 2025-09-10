@@ -180,25 +180,25 @@ func (c *AppContainer) initializeRepositories() error {
 
 	// Import the actual repository implementations
 	var mongoRepo repositories.QueryRepository
-    if c.mongoClient != nil {
-        // Extract the raw mongo.Client from your wrapper
-        rawMongoClient := c.mongoClient.GetMongoClient()
-        if rawMongoClient != nil {
-            // Use your database name from config
-            databaseName := c.config.MongoDB.Database
-            if databaseName == "" {
-                databaseName = "mathprereq" // default database name
-            }
-            mongoRepo = infrastructurerepos.NewMongoQueryRepository(rawMongoClient, databaseName, c.logger)
-		 } else {
-            c.logger.Warn("Raw MongoDB client is nil, using nil repository")
-        }
-    } else {
-        c.logger.Info("MongoDB client not initialized, using nil repository")
-    }
+	if c.mongoClient != nil {
+		// Extract the raw mongo.Client from your wrapper
+		rawMongoClient := c.mongoClient.GetMongoClient()
+		if rawMongoClient != nil {
+			// Use your database name from config
+			databaseName := c.config.MongoDB.Database
+			if databaseName == "" {
+				databaseName = "mathprereq" // default database name
+			}
+			mongoRepo = infrastructurerepos.NewMongoQueryRepository(rawMongoClient, databaseName, c.logger)
+		} else {
+			c.logger.Warn("Raw MongoDB client is nil, using nil repository")
+		}
+	} else {
+		c.logger.Info("MongoDB client not initialized, using nil repository")
+	}
 
 	neo4jRepo := infrastructurerepos.NewNeo4jConceptRepository(c.neo4jClient, c.logger)
-	
+
 	weaviateRepo := infrastructurerepos.NewWeaviateVectorRepository(c.weaviateClient, c.logger)
 
 	c.conceptRepo = neo4jRepo
@@ -242,14 +242,14 @@ func (c *AppContainer) initializeScraper() error {
 
 	// Create scraper configuration
 	scraperConfig := scraper.ScraperConfig{
-		MaxConcurrentRequests: 5,
-		RequestTimeout:        30 * time.Second,
-		RateLimit:             2.0, // 2 requests per second
+		MaxConcurrentRequests: 3,                // Reduced from 5
+		RequestTimeout:        45 * time.Second, // Increased from 30s
+		RateLimit:             1.5,              // Slower rate to avoid timeouts
 		UserAgent:             "MathPrereq-ResourceFinder/2.0",
 		DatabaseName:          "mathprereq",
 		CollectionName:        "educational_resources",
-		MaxRetries:            3,
-		RetryDelay:            2 * time.Second,
+		MaxRetries:            2,               // Reduced retries
+		RetryDelay:            3 * time.Second, // Increased delay
 	}
 
 	// Initialize scraper with shared MongoDB client
