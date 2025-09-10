@@ -41,12 +41,13 @@ func Setup(router *gin.Engine, h *handlers.Handlers) {
 	// API routes with extended timeout for query operations
 	v1 := router.Group("/api/v1")
 	{
-		// Apply extended timeout only to query endpoints
-		queryGroup := v1.Group("/")
-		queryGroup.Use(RequestTimeoutMiddleware(10 * time.Minute)) // Extended timeout
+		// Apply extended timeout to query and learning resources endpoints
+		extendedTimeoutGroup := v1.Group("/")
+		extendedTimeoutGroup.Use(RequestTimeoutMiddleware(10 * time.Minute)) // Extended timeout
 		{
-			queryGroup.POST("/query", h.ProcessQuery)
-			queryGroup.POST("/concept-detail", h.GetConceptDetail)
+			extendedTimeoutGroup.POST("/query", h.ProcessQuery)
+			extendedTimeoutGroup.POST("/concept-detail", h.GetConceptDetail)
+			extendedTimeoutGroup.POST("/learning-resources", h.ScrapeAndGetLearningResources) // Simplified endpoint
 		}
 
 		// Standard timeout for other endpoints

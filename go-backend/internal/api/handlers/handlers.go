@@ -3,23 +3,30 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mathprereq/internal/api/models"
 	"github.com/mathprereq/internal/core/orchestrator"
+	"github.com/mathprereq/internal/data/mongodb"
+	"github.com/mathprereq/internal/data/scraper"
 	"go.uber.org/zap"
 )
 
 type Handlers struct {
 	orchestrator *orchestrator.Orchestrator
+	mongoClient  *mongodb.Client
+	webScraper   *scraper.EducationalWebScraper
 	logger       *zap.Logger
 	startTime    time.Time
 }
 
-func New(orch *orchestrator.Orchestrator, logger *zap.Logger) *Handlers {
+func New(orch *orchestrator.Orchestrator, mongoClient *mongodb.Client, webScraper *scraper.EducationalWebScraper, logger *zap.Logger) *Handlers {
 	return &Handlers{
 		orchestrator: orch,
+		mongoClient:  mongoClient,
+		webScraper:   webScraper,
 		logger:       logger,
 		startTime:    time.Now(),
 	}
@@ -239,9 +246,97 @@ func (h *Handlers) HealthCheck(c *gin.Context) {
 	})
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// ScrapeAndGetLearningResources - Simple endpoint to scrape and return learning resources
+func (h *Handlers) ScrapeAndGetLearningResources(c *gin.Context) {
+	start := time.Now()
+
+	var req struct {
+		ConceptName string `json:"concept_name" binding:"required"`
+		Limit       int    `json:"limit,omitempty"`
 	}
-	return b
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("Invalid learning resources request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	if req.Limit == 0 {
+		req.Limit = 5 // Default limit
+	}
+
+	h.logger.Info("Scraping learning resources",
+		zap.String("concept_name", req.ConceptName),
+		zap.Int("limit", req.Limit))
+
+	// Check if scraper is available
+	if h.webScraper == nil {
+		h.logger.Error("Web scraper not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Web scraper service is not available",
+		})
+		return
+	}
+
+	// First try to get existing resources
+	conceptID := generateConceptID(req.ConceptName)
+	existingResources, err := h.webScraper.GetResourcesForConcept(c.Request.Context(), conceptID, req.Limit)
+
+	if err != nil || len(existingResources) == 0 {
+		// No existing resources, trigger scraping
+		h.logger.Info("No existing resources found, triggering scraping",
+			zap.String("concept", req.ConceptName))
+
+		err = h.webScraper.ScrapeResourcesForConcepts(c.Request.Context(), []string{req.ConceptName})
+		if err != nil {
+			h.logger.Error("Failed to scrape resources", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "Failed to scrape resources: " + err.Error(),
+			})
+			return
+		}
+
+		// Get resources after scraping
+		existingResources, err = h.webScraper.GetResourcesForConcept(c.Request.Context(), conceptID, req.Limit)
+		if err != nil {
+			h.logger.Error("Failed to retrieve scraped resources", zap.Error(err))
+		}
+	}
+
+	processingTime := time.Since(start)
+
+	h.logger.Info("Learning resources request completed",
+		zap.String("concept_name", req.ConceptName),
+		zap.Int("resources_found", len(existingResources)),
+		zap.Duration("processing_time", processingTime))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":         true,
+		"concept_name":    req.ConceptName,
+		"concept_id":      conceptID,
+		"total_resources": len(existingResources),
+		"resources":       existingResources,
+		"processing_time": processingTime.String(),
+	})
+}
+
+// Helper function to generate concept ID
+func generateConceptID(conceptName string) string {
+	// Simple concept ID generation
+	id := strings.ToLower(conceptName)
+	id = strings.ReplaceAll(id, " ", "_")
+	id = strings.ReplaceAll(id, "-", "_")
+	// Remove any non-alphanumeric characters except underscore
+	var result strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }

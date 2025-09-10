@@ -2170,3 +2170,355 @@ body {
 .clickable-title:hover {
   color: #1a73e8 !important;
 }
+
+/* Visual Roadmap (Neural Network) Styles */
+.neural-container {
+  background: white !important;
+  border-radius: 1rem !important;
+  border: 1px solid #e8eaed !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  overflow: hidden !important;
+  width: 100% !important;
+}
+
+.neural-empty {
+  text-align: center !important;
+  padding: 4rem 2rem !important;
+  color: #9aa0a6 !important;
+}
+
+.empty-neuron {
+  width: 4rem !important;
+  height: 4rem !important;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 auto 1.5rem !important;
+  color: white !important;
+}
+
+.neural-empty h3 {
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  color: #5f6368 !important;
+  margin: 0 0 0.5rem 0 !important;
+}
+
+.neural-empty p {
+  color: #9aa0a6 !important;
+  margin: 0 !important;
+}
+
+.neural-header {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  color: white !important;
+  padding: 1rem 1.5rem !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+.neural-header h2 {
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  color: white !important;
+}
+
+.neural-stats {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.75rem !important;
+  color: white !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+}
+
+.neural-pulse {
+  width: 0.5rem !important;
+  height: 0.5rem !important;
+  background: #10b981 !important;
+  border-radius: 50% !important;
+  animation: neuralPulse 2s infinite !important;
+}
+
+@keyframes neuralPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.neural-canvas {
+  position: relative !important;
+  width: 600px !important;
+  height: 500px !important;
+  background: radial-gradient(circle at center, #f8fafc 0%, #f1f5f9 100%) !important;
+  overflow: hidden !important;
+  cursor: grab !important;
+}
+
+.neural-canvas:active {
+  cursor: grabbing !important;
+}
+
+.neural-connections {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+  z-index: 1 !important;
+}
+
+.neural-connection {
+  transition: all 0.3s ease !important;
+}
+
+.neural-node {
+  position: absolute !important;
+  border: 3px solid !important;
+  border-radius: 50% !important;
+  cursor: grab !important;
+  transition: all 0.3s ease !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 2 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  animation: nodeFloat 3s ease-in-out infinite !important;
+}
+
+.neural-node:hover {
+  transform: scale(1.1) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
+  z-index: 3 !important;
+}
+
+.neural-node:active {
+  cursor: grabbing !important;
+}
+
+.neural-node.dragging {
+  z-index: 4 !important;
+  transform: scale(1.1) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+}
+
+.neural-node.active {
+  animation: activeNeuron 2s ease-in-out infinite !important;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5) !important;
+}
+
+@keyframes nodeFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes activeNeuron {
+  0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+  50% { box-shadow: 0 0 30px rgba(59, 130, 246, 0.8); }
+}
+
+.neural-core {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  text-align: center !important;
+  position: relative !important;
+}
+
+.concept-label {
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  color: #374151 !important;
+  line-height: 1.2 !important;
+  max-width: 90% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.neural-node.active .concept-label {
+  color: white !important;
+}
+
+.neural-activity {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 6px !important;
+  height: 6px !important;
+  background: white !important;
+  border-radius: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  animation: activityPulse 1s infinite !important;
+}
+
+@keyframes activityPulse {
+  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.5); }
+}
+
+.neural-pulse-ring {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 120% !important;
+  height: 120% !important;
+  border: 2px solid rgba(59, 130, 246, 0.6) !important;
+  border-radius: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  animation: pulseRing 2s infinite !important;
+  pointer-events: none !important;
+}
+
+@keyframes pulseRing {
+  0% {
+    transform: translate(-50%, -50%) scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+}
+
+.neural-modal {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 1000 !important;
+  padding: 1.5rem !important;
+}
+
+.modal-neuron {
+  background: white !important;
+  border-radius: 1rem !important;
+  max-width: 400px !important;
+  width: 100% !important;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15) !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.modal-close-neural {
+  position: absolute !important;
+  top: 1rem !important;
+  right: 1rem !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: none !important;
+  border-radius: 50% !important;
+  width: 2rem !important;
+  height: 2rem !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #6b7280 !important;
+  transition: all 0.2s ease !important;
+  z-index: 1 !important;
+}
+
+.modal-close-neural:hover {
+  background: rgba(255, 255, 255, 1) !important;
+  color: #374151 !important;
+  transform: scale(1.1) !important;
+}
+
+.neuron-info {
+  padding: 2rem !important;
+  text-align: center !important;
+}
+
+.neuron-indicator {
+  width: 3rem !important;
+  height: 3rem !important;
+  border-radius: 50% !important;
+  margin: 0 auto 1rem !important;
+  animation: neuronIndicatorPulse 2s infinite !important;
+}
+
+@keyframes neuronIndicatorPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.neuron-info h3 {
+  font-size: 1.5rem !important;
+  font-weight: 600 !important;
+  color: #1f2937 !important;
+  margin: 0 0 1rem 0 !important;
+}
+
+.neuron-info p {
+  color: #6b7280 !important;
+  line-height: 1.6 !important;
+  margin: 0 0 1.5rem 0 !important;
+}
+
+.activate-button {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 0.5rem !important;
+  padding: 0.75rem 1.5rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  width: 100% !important;
+}
+
+.activate-button:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+}
+
+.activate-button.activated {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+}
+
+.activate-button.activated:hover {
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+}
+
+/* Mobile Responsive for Neural Network */
+@media (max-width: 768px) {
+  .neural-canvas {
+    width: 100% !important;
+    height: 400px !important;
+  }
+  
+  .neural-connections {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  
+  .neural-node {
+    min-width: 2rem !important;
+    min-height: 2rem !important;
+  }
+  
+  .concept-label {
+    font-size: 0.6rem !important;
+  }
+  
+  .neuron-info {
+    padding: 1.5rem !important;
+  }
+  
+  .neuron-info h3 {
+    font-size: 1.25rem !important;
+  }
+}

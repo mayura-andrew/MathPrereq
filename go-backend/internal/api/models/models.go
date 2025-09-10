@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/mathprereq/internal/data/scraper"
+)
 
 type QueryRequest struct {
 	Question string `json:"question" binding:"required,min=1,max=500"`
@@ -36,12 +40,13 @@ type ConceptDetailRequest struct {
 }
 
 type ConceptDetailResponse struct {
-	Success             bool          `json:"success"`
-	Concept             *ConceptInfo  `json:"concept,omitempty"`
-	Prerequisites       []ConceptInfo `json:"prerequisites"`
-	LeadsTo             []ConceptInfo `json:"leads_to"`
-	DetailedExplanation string        `json:"detailed_explanation"`
-	ErrorMessage        *string       `json:"error_message,omitempty"`
+	Success             bool                          `json:"success"`
+	Concept             *ConceptInfo                  `json:"concept,omitempty"`
+	Prerequisites       []ConceptInfo                 `json:"prerequisites"`
+	LeadsTo             []ConceptInfo                 `json:"leads_to"`
+	LearningResources   []scraper.EducationalResource `json:"learning_resources"`
+	DetailedExplanation string                        `json:"detailed_explanation"`
+	ErrorMessage        *string                       `json:"error_message,omitempty"`
 }
 
 type HealthResponse struct {
@@ -53,4 +58,3 @@ type HealthResponse struct {
 	TotalChunks          int    `json:"total_chunks"`
 	Uptime               string `json:"uptime"`
 }
-

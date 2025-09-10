@@ -73,6 +73,27 @@ services:
     networks:
       - math-learning
 
+  # MongoDB for Educational Resources
+  mongodb:
+    image: mongo:7.0
+    container_name: math-learning-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: mathprereq
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - math-learning
+
   # Go API Server
   api:
     build:
@@ -94,6 +115,7 @@ services:
       MLF_LLM_MODEL: "gemini-2.5-pro"
       MLF_LLM_MAX_TOKENS: 2048
       MLF_LOGGING_LEVEL: "info"
+      MONGODB_URI: "mongodb://admin:password123@mongodb:27017/mathprereq?authSource=admin"
     ports:
       - "8000:8000"
     depends_on:
@@ -102,6 +124,8 @@ services:
       weaviate:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
     volumes:
       - ./data:/app/data
@@ -119,6 +143,7 @@ volumes:
   neo4j_plugins:
   weaviate_data:
   redis_data:
+  mongodb_data:
 
 networks:
   math-learning:

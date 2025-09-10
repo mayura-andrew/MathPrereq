@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,7 +16,9 @@ import (
 	"github.com/mathprereq/internal/api/routes"
 	"github.com/mathprereq/internal/core/config"
 	"github.com/mathprereq/internal/core/orchestrator"
+	"github.com/mathprereq/internal/data/mongodb"
 	"github.com/mathprereq/internal/data/neo4j"
+	"github.com/mathprereq/internal/data/scraper"
 	"github.com/mathprereq/internal/data/weaviate"
 	"github.com/mathprereq/pkg/logger"
 	"go.uber.org/zap"
@@ -47,11 +50,69 @@ func main() {
 		zapLogger.Fatal("Failed to initialize Weaviate", zap.Error(err))
 	}
 
+	// Initialize MongoDB with proper error handling
+	mongoConfig := mongodb.Config{
+		URI:            getEnvString("MONGODB_URI", "mongodb://admin:password123@localhost:27017/mathprereq?authSource=admin"),
+		Database:       getEnvString("MONGODB_DATABASE", "mathprereq"),
+		ConnectTimeout: 10 * time.Second,
+		QueryTimeout:   30 * time.Second,
+	}
+
+	zapLogger.Info("Initializing MongoDB",
+		zap.String("database", mongoConfig.Database),
+		zap.String("uri", "mongodb://***:***@localhost:27017/mathprereq"))
+
+	mongoClient, err := mongodb.NewClient(mongoConfig)
+	if err != nil {
+		zapLogger.Fatal("Failed to initialize MongoDB", zap.Error(err))
+	}
+	defer func() {
+		if err := mongoClient.Close(context.Background()); err != nil {
+			zapLogger.Error("Error closing MongoDB client", zap.Error(err))
+		}
+	}()
+
+	// // Test MongoDB connection with longer timeout
+	// testCtx, testCancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased to 60s
+	// defer testCancel()
+
+	// if err := mongoClient.Ping(testCtx); err != nil {
+	// 	zapLogger.Fatal("Failed to ping MongoDB", zap.Error(err))
+	// }
+	zapLogger.Info("MongoDB connection verified successfully")
+	// Initialize web scraper (integrated into main server)
+	var webScraper *scraper.EducationalWebScraper
+	if mongoClient != nil {
+		// Initialize web scraper configuration with the correct authenticated URI
+		scraperConfig := scraper.ScraperConfig{
+			MaxConcurrentRequests: getEnvInt("SCRAPER_MAX_CONCURRENT", 8),
+			RequestTimeout:        time.Duration(getEnvInt("SCRAPER_TIMEOUT_SECONDS", 30)) * time.Second,
+			RateLimit:             getEnvFloat("SCRAPER_RATE_LIMIT", 3.0),
+			UserAgent:             getEnvString("SCRAPER_USER_AGENT", "MathPrereqBot/1.0 (+https://mathprereq.com/bot)"),
+			MongoURI:              mongoConfig.URI, // Pass the authenticated URI
+			DatabaseName:          mongoConfig.Database,
+			CollectionName:        getEnvString("SCRAPER_COLLECTION", "educational_resources"),
+			MaxRetries:            3,
+			RetryDelay:            2 * time.Second,
+		}
+
+		// Create scraper with shared client but also pass the authenticated URI
+		webScraper, err = scraper.New(scraperConfig, mongoClient.GetMongoClient())
+		if err != nil {
+			zapLogger.Warn("Failed to initialize web scraper, continuing without scraping features", zap.Error(err))
+			webScraper = nil
+		} else {
+			zapLogger.Info("Web scraper initialized successfully with shared MongoDB client")
+		}
+	} else {
+		zapLogger.Warn("MongoDB client not available, skipping web scraper initialization")
+	}
+
 	// Initialize orchestrator
 	orchestrator := orchestrator.New(neo4jClient, weaviateClient, cfg.LLM)
 
-	// Initialize handlers
-	handlers := handlers.New(orchestrator, zapLogger)
+	// Initialize handlers with MongoDB client and web scraper
+	handlers := handlers.New(orchestrator, mongoClient, webScraper, zapLogger)
 
 	// Setup router
 	router := gin.New()
@@ -87,4 +148,30 @@ func main() {
 	}
 
 	zapLogger.Info("Server exited")
+}
+
+// Helper functions
+func getEnvString(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

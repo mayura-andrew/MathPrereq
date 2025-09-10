@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mathprereq/internal/data/mongodb"
 	"github.com/spf13/viper"
 )
 
@@ -13,6 +14,7 @@ type Config struct {
 	Weaviate WeaviateConfig `mapstructure:"weaviate"`
 	LLM      LLMConfig      `mapstructure:"llm"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
+	MongoDB  mongodb.Config `yaml:"mongodb"`
 }
 
 type ServerConfig struct {
@@ -112,6 +114,12 @@ func setDefaults() {
 	// Logging defaults
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.format", "json")
+
+	// MongoDB defaults
+	viper.SetDefault("mongodb.uri", "mongodb://localhost:27017")
+	viper.SetDefault("mongodb.database", "mydatabase")
+	viper.SetDefault("mongodb.username", "myuser")
+	viper.SetDefault("mongodb.password", "mypassword")
 }
 
 func validateConfig(config *Config) error {
