@@ -23,10 +23,10 @@ type Config struct {
 
 // Client wraps MongoDB client with additional functionality
 type Client struct {
-	client   *mongo.Client
-	database *mongo.Database
-	config   Config
-	logger   *zap.Logger
+	config      Config
+	mongoClient *mongo.Client
+	database    *mongo.Database
+	logger      *zap.Logger
 }
 
 // NewClient creates a new MongoDB client
@@ -44,51 +44,63 @@ func NewClient(config Config) (*Client, error) {
 		config.Database = "mathprereq"
 	}
 
-	// Create MongoDB client options
+	// Create client options with authentication
 	clientOptions := options.Client().
 		ApplyURI(config.URI).
 		SetConnectTimeout(config.ConnectTimeout).
-		SetServerSelectionTimeout(config.ConnectTimeout)
+		SetServerSelectionTimeout(config.ConnectTimeout).
+		SetSocketTimeout(config.QueryTimeout).
+		SetMaxPoolSize(10).
+		SetMinPoolSize(2)
+
+	logger.Info("Creating MongoDB client",
+		zap.String("uri", config.URI),
+		zap.String("database", config.Database),
+		zap.Duration("connect_timeout", config.ConnectTimeout))
 
 	// Connect to MongoDB
-	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
-	defer cancel()
-
-	client, err := mongo.Connect(ctx, clientOptions)
+	mongoClient, err := mongo.Connect(context.Background(), clientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 
 	// Test the connection
-	if err := client.Ping(ctx, nil); err != nil {
+	testCtx, testCancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
+	defer testCancel()
+
+	if err := mongoClient.Ping(testCtx, nil); err != nil {
 		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
 	}
 
-	logger.Info("Connected to MongoDB successfully",
-		zap.String("database", config.Database),
-		zap.Duration("connect_timeout", config.ConnectTimeout))
+	database := mongoClient.Database(config.Database)
 
-	return &Client{
-		client:   client,
-		database: client.Database(config.Database),
-		logger:   logger,
-	}, nil
+	client := &Client{
+		config:      config,
+		mongoClient: mongoClient,
+		database:    database,
+		logger:      logger,
+	}
+
+	logger.Info("MongoDB client created successfully",
+		zap.String("database", config.Database))
+
+	return client, nil
 }
 
 // GetMongoClient returns the underlying MongoDB client
 func (c *Client) GetMongoClient() *mongo.Client {
-	return c.client
+	return c.mongoClient
 }
 
-// GetDatabase returns the database instance
+// GetDatabase returns the MongoDB database
 func (c *Client) GetDatabase() *mongo.Database {
 	return c.database
 }
 
 // Close disconnects the MongoDB client
 func (c *Client) Close(ctx context.Context) error {
-	if c.client != nil {
-		return c.client.Disconnect(ctx)
+	if c.mongoClient != nil {
+		return c.mongoClient.Disconnect(ctx)
 	}
 	return nil
 }
@@ -100,10 +112,7 @@ func (c *Client) GetCollection(name string) *mongo.Collection {
 
 // Ping tests the MongoDB connection
 func (c *Client) Ping(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, c.config.QueryTimeout)
-	defer cancel()
-
-	return c.client.Ping(ctx, nil)
+	return c.mongoClient.Ping(ctx, nil)
 }
 
 // GetStats returns MongoDB statistics

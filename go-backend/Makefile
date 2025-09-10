@@ -211,10 +211,10 @@ test-shared-client:
 	@./scripts/test-shared-client-auth.sh
 
 # Complete MongoDB authentication fix
-fix-mongo-complete:
-	@echo "🔧 Complete MongoDB Authentication Fix..."
-	@chmod +x scripts/fix-mongo-auth-complete.sh
-	@./scripts/fix-mongo-auth-complete.sh
+complete-mongo-fix:
+	@echo "🔍 Complete MongoDB Authentication Fix..."
+	@chmod +x scripts/complete-mongo-fix.sh
+	@./scripts/complete-mongo-fix.sh
 
 # Test basic MongoDB connection
 test-mongo-basic:
@@ -245,3 +245,75 @@ analyze-mongo:
 	@echo "🔍 Analyzing MongoDB Connection..."
 	@chmod +x scripts/analyze-mongo-connection.sh
 	@./scripts/analyze-mongo-connection.sh
+
+# Test MongoDB authentication
+test-mongo-auth:
+	@echo "🔍 Testing MongoDB Authentication..."
+	@chmod +x scripts/test-mongo-auth.sh
+	@./scripts/test-mongo-auth.sh
+
+# Quick MongoDB check
+quick-mongo-check:
+	@echo "🔍 Quick MongoDB Authentication Check..."
+	@chmod +x scripts/quick-mongo-check.sh
+	@./scripts/quick-mongo-check.sh
+
+# Debug MongoDB connection
+debug-mongo-connection:
+	@echo "🔍 Debugging MongoDB Connection..."
+	@chmod +x scripts/debug-mongo-connection.sh
+	@./scripts/debug-mongo-connection.sh
+
+# Fix MongoDB authentication
+fix-mongo-auth:
+	@echo "🔍 Fixing MongoDB Authentication..."
+	@chmod +x scripts/fix-mongo-auth.sh
+	@./scripts/fix-mongo-auth.sh
+
+# Check MongoDB permissions
+check-mongo-permissions:
+	@echo "🔍 Checking MongoDB User Permissions..."
+	@chmod +x scripts/check-mongo-permissions.sh
+	@./scripts/check-mongo-permissions.sh
+
+# Create MongoDB user with proper permissions
+create-mongo-user:
+	@echo "🔍 Creating MongoDB User with Proper Permissions..."
+	@chmod +x scripts/create-mongo-user.sh
+	@./scripts/create-mongo-user.sh
+
+# Check MongoDB init script
+check-init-script:
+	@echo "🔍 Checking MongoDB Initialization Script..."
+	@chmod +x scripts/check-init-script.sh
+	@./scripts/check-init-script.sh
+
+# Check MongoDB authentication status
+mongo-auth-status:
+	@echo "🔍 Checking MongoDB Authentication Status..."
+	@chmod +x scripts/mongo-auth-status.sh
+	@./scripts/mongo-auth-status.sh
+
+# Quick MongoDB authentication fix
+quick-mongo-fix:
+	@echo "🔍 Quick MongoDB Authentication Fix..."
+	@chmod +x scripts/quick-mongo-fix.sh
+	@./scripts/quick-mongo-fix.sh
+
+# Diagnose MongoDB authentication
+diagnose-mongo-auth:
+	@echo "🔍 Diagnosing MongoDB Authentication..."
+	@chmod +x scripts/diagnose-mongo-auth.sh
+	@./scripts/diagnose-mongo-auth.sh
+
+# Test query analytics functionality
+test-query-analytics:
+	@echo "🔍 Testing Query Analytics Functionality..."
+	@chmod +x scripts/test-query-analytics.sh
+	@./scripts/test-query-analytics.sh
+
+# Explore stored query data
+explore-query-data:
+	@echo "🔍 Exploring Query Analytics Data..."
+	@chmod +x scripts/explore-query-data.sh
+	@./scripts/explore-query-data.sh

@@ -103,7 +103,7 @@ func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string
 
 // 	query := `
 // 		MATCH (c:Concept)
-// 		WHERE toLower(c.name) CONTAINS toLower($conceptName) 
+// 		WHERE toLower(c.name) CONTAINS toLower($conceptName)
 // 		   OR toLower(c.id) = toLower($conceptName)
 // 		RETURN c.id as id
 // 		LIMIT 1

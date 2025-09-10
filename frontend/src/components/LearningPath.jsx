@@ -17,8 +17,11 @@ import { mathAPI } from '../services/api'
 const LearningPath = ({ learningPath }) => {
   const [selectedStep, setSelectedStep] = useState(null)
   const [completedSteps, setCompletedSteps] = useState(new Set())
-  const [learningPanel, setLearningPanel] = useState(null)
+  const [learningTabs, setLearningTabs] = useState([]) // Array of open tabs
+  const [activeTabId, setActiveTabId] = useState(null) // Currently active tab
   const [loadingConcept, setLoadingConcept] = useState(false)
+  const [searchingResources, setSearchingResources] = useState(false)
+  const [searchedResources, setSearchedResources] = useState({}) // Store searched resources per tab
   
   console.log('LearningPath received:', learningPath) // Debug log
 
@@ -54,46 +57,115 @@ const LearningPath = ({ learningPath }) => {
   }
 
   const startLearning = async (concept) => {
-    setLoadingConcept(true)
-    setLearningPanel({
+    // Check if tab already exists
+    const existingTab = learningTabs.find(tab => tab.concept === concept.name)
+    
+    if (existingTab) {
+      // Switch to existing tab
+      setActiveTabId(existingTab.id)
+      return
+    }
+
+    // Create new tab
+    const tabId = Date.now().toString()
+    const newTab = {
+      id: tabId,
       concept: concept.name,
       difficulty: concept.difficulty,
       estimatedTime: concept.estimatedTime,
       description: concept.description,
       prerequisites: [],
       resources: [],
-      examples: []
-    })
+      examples: [],
+      loading: true
+    }
+
+    // Add tab and set as active
+    setLearningTabs(prev => [...prev, newTab])
+    setActiveTabId(tabId)
+    setLoadingConcept(true)
 
     try {
       // Get detailed concept information using the correct API endpoint
       const conceptDetail = await mathAPI.getConceptDetail(concept.name)
       
-      setLearningPanel(prev => ({
-        ...prev,
-        explanation: conceptDetail.detailed_explanation || conceptDetail.explanation || conceptDetail.answer,
-        prerequisites: conceptDetail.prerequisites || [],
-        examples: conceptDetail.examples || [],
-        resources: conceptDetail.resources || [],
-        leads_to: conceptDetail.leads_to || []
-      }))
+      // Update the specific tab with loaded data
+      setLearningTabs(prev => prev.map(tab => 
+        tab.id === tabId ? {
+          ...tab,
+          loading: false,
+          explanation: conceptDetail.detailed_explanation || conceptDetail.explanation || conceptDetail.answer,
+          prerequisites: conceptDetail.prerequisites || [],
+          examples: conceptDetail.examples || [],
+          resources: conceptDetail.resources || [],
+          leads_to: conceptDetail.leads_to || []
+        } : tab
+      ))
       
       // Debug logging to see what we received
       console.log('🔍 Concept detail received:', conceptDetail)
       console.log('📚 Prerequisites found:', conceptDetail.prerequisites)
     } catch (error) {
       console.error('Failed to load concept details:', error)
-      setLearningPanel(prev => ({
-        ...prev,
-        error: 'Failed to load detailed information for this concept. Please try again.'
-      }))
+      setLearningTabs(prev => prev.map(tab => 
+        tab.id === tabId ? {
+          ...tab,
+          loading: false,
+          error: 'Failed to load detailed information for this concept. Please try again.'
+        } : tab
+      ))
     } finally {
       setLoadingConcept(false)
     }
   }
 
-  const closeLearningPanel = () => {
-    setLearningPanel(null)
+  const closeTab = (tabId) => {
+    const updatedTabs = learningTabs.filter(tab => tab.id !== tabId)
+    setLearningTabs(updatedTabs)
+    
+    // If we closed the active tab, switch to another tab or close panel
+    if (activeTabId === tabId) {
+      if (updatedTabs.length > 0) {
+        setActiveTabId(updatedTabs[updatedTabs.length - 1].id)
+      } else {
+        setActiveTabId(null)
+      }
+    }
+  }
+
+  const switchTab = (tabId) => {
+    setActiveTabId(tabId)
+  }
+
+  const searchLearningResources = async (concept, tabId) => {
+    setSearchingResources(true)
+    
+    try {
+      // Make API request to search for learning resources
+      const searchResults = await mathAPI.searchLearningResources(concept)
+      
+      // Store searched resources for this tab
+      setSearchedResources(prev => ({
+        ...prev,
+        [tabId]: searchResults.resources || []
+      }))
+      
+      console.log('🔍 Learning resources found:', searchResults)
+    } catch (error) {
+      console.error('Failed to search learning resources:', error)
+      setSearchedResources(prev => ({
+        ...prev,
+        [tabId]: []
+      }))
+    } finally {
+      setSearchingResources(false)
+    }
+  }
+
+  const extractYouTubeId = (url) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/
+    const match = url.match(regExp)
+    return (match && match[2].length === 11) ? match[2] : null
   }
 
   const toggleComplete = (stepId) => {
@@ -128,7 +200,7 @@ const LearningPath = ({ learningPath }) => {
   }
 
   return (
-    <div className={`learning-path-wrapper ${learningPanel ? 'panel-open' : ''}`}>
+    <div className={`learning-path-wrapper ${learningTabs.length > 0 ? 'panel-open' : ''}`}>
       <div className="learning-path-container">
         <div className="learning-path-header">
           <div className="header-icon">
@@ -241,223 +313,339 @@ const LearningPath = ({ learningPath }) => {
         )}
       </div>
 
-      {/* Learning Side Panel */}
-      {learningPanel && (
+      {/* Learning Side Panel with Tabs */}
+      {learningTabs.length > 0 && (
         <div className="learning-side-panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <BookOpenIcon className="w-6 h-6" />
-              <h3>{learningPanel.concept}</h3>
+          {/* Tab Navigation */}
+          <div className="tabs-header">
+            <div className="tabs-nav">
+              {learningTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`tab-item ${activeTabId === tab.id ? 'active' : ''}`}
+                  onClick={() => switchTab(tab.id)}
+                >
+                  <span className="tab-title">{tab.concept}</span>
+                  <button
+                    className="tab-close"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closeTab(tab.id)
+                    }}
+                  >
+                    <XMarkIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
             </div>
-            <button 
-              className="panel-close"
-              onClick={closeLearningPanel}
-            >
-              <XMarkIcon className="w-5 h-5" />
-            </button>
           </div>
 
-          <div className="panel-content">
-            {loadingConcept ? (
-              <div className="panel-loading">
-                <div className="loading-spinner"></div>
-                <p>Loading concept details...</p>
-              </div>
-            ) : (
-              <>
-                {/* Concept Overview */}
-                <div className="concept-overview">
-                  <div className="concept-meta">
-                    <span 
-                      className="difficulty-badge"
-                      style={{ background: getDifficultyColor(learningPanel.difficulty) }}
-                    >
-                      {learningPanel.difficulty}
-                    </span>
-                    <span className="time-estimate">
-                      <ClockIcon className="w-4 h-4" />
-                      {learningPanel.estimatedTime}
-                    </span>
-                  </div>
-                  
-                  {learningPanel.description && (
-                    <p className="concept-description">{learningPanel.description}</p>
-                  )}
-                </div>
+          {/* Active Tab Content */}
+          {(() => {
+            const activeTab = learningTabs.find(tab => tab.id === activeTabId)
+            if (!activeTab) return null
 
-                {/* Detailed Explanation */}
-                {learningPanel.explanation && (
-                  <div className="concept-explanation">
-                    <h4>Detailed Explanation</h4>
-                    <div className="explanation-content">
-                      {learningPanel.explanation}
-                    </div>
-                  </div>
-                )}
-
-                {/* Prerequisites */}
-                {console.log('🔍 Checking prerequisites:', learningPanel.prerequisites)}
-                {learningPanel.prerequisites && learningPanel.prerequisites.length > 0 ? (
-                  <div className="prerequisites-section">
-                    <h4>📚 Prerequisites</h4>
-                    <p style={{ color: 'var(--edu-gray-600)', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                      You should understand these concepts first:
-                    </p>
-                    <div className="prerequisites-list">
-                      {learningPanel.prerequisites.map((prereq, index) => {
-                        console.log(`📋 Processing prerequisite ${index}:`, prereq)
-                        
-                        // Safely extract prerequisite information
-                        const prereqName = typeof prereq === 'string' ? prereq : 
-                                         prereq?.name || prereq?.title || `Prerequisite ${index + 1}`
-                        const prereqDesc = typeof prereq === 'object' ? 
-                                         prereq?.description || '' : ''
-                        const prereqType = typeof prereq === 'object' ? 
-                                         prereq?.type || 'concept' : 'concept'
-                        
-                        console.log(`✅ Extracted: name="${prereqName}", desc="${prereqDesc}", type="${prereqType}"`)
-                        
-                        return (
-                          <div key={index} className="prerequisite-item">
-                            <ArrowRightIcon className="w-4 h-4" style={{ color: 'var(--edu-primary)' }} />
-                            <div className="prerequisite-content">
-                              <span className="prerequisite-title">{prereqName}</span>
-                              {prereqDesc && (
-                                <span className="prerequisite-description">{prereqDesc}</span>
-                              )}
-                              <span className="prerequisite-type">{prereqType}</span>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
+            return (
+              <div className="tab-content">
+                {activeTab.loading ? (
+                  <div className="panel-loading">
+                    <div className="loading-spinner"></div>
+                    <p>Loading {activeTab.concept} details...</p>
                   </div>
                 ) : (
-                  <div className="no-prerequisites">
-                    <p>No prerequisites found or prerequisites data is empty.</p>
-                    <small>Debug: {JSON.stringify(learningPanel.prerequisites)}</small>
-                  </div>
-                )}
-
-                {/* Examples */}
-                {learningPanel.examples && learningPanel.examples.length > 0 && (
-                  <div className="examples-section">
-                    <h4>Examples</h4>
-                    <div className="examples-list">
-                      {learningPanel.examples.map((example, index) => {
-                        // Safely extract example text
-                        const exampleText = typeof example === 'string' ? example : 
-                                          example?.name || example?.title || example?.description || 
-                                          `Example ${index + 1}`
-                        return (
-                          <div key={index} className="example-item">
-                            <DocumentTextIcon className="w-4 h-4" />
-                            <span>{exampleText}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Learning Resources */}
-                <div className="resources-section">
-                  <h4>Learning Resources</h4>
-                  {learningPanel.resources && learningPanel.resources.length > 0 ? (
-                    <div className="resources-list">
-                      {learningPanel.resources.map((resource, index) => (
-                        <a 
-                          key={index}
-                          href={resource.url || '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="resource-link"
+                  <>
+                    {/* Concept Overview */}
+                    <div className="concept-overview">
+                      <div className="concept-meta">
+                        <span 
+                          className="difficulty-badge"
+                          style={{ background: getDifficultyColor(activeTab.difficulty) }}
                         >
-                          <div className="resource-icon">
-                            {resource.type === 'video' ? (
-                              <PlayIcon className="w-4 h-4" />
-                            ) : (
-                              <GlobeAltIcon className="w-4 h-4" />
-                            )}
-                          </div>
-                          <div className="resource-content">
-                            <span className="resource-title">{resource.title || resource.name}</span>
-                            <span className="resource-type">{resource.type || 'Article'}</span>
-                          </div>
-                          <LinkIcon className="w-4 h-4 resource-external" />
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="no-resources">
-                      <p>No specific resources available. General study materials:</p>
-                      <div className="general-resources">
-                        <a href={`https://www.khanacademy.org/search?query=${encodeURIComponent(learningPanel.concept)}`} 
-                           target="_blank" rel="noopener noreferrer" className="resource-link">
-                          <div className="resource-icon">
-                            <GlobeAltIcon className="w-4 h-4" />
-                          </div>
-                          <div className="resource-content">
-                            <span className="resource-title">Khan Academy</span>
-                            <span className="resource-type">Educational Platform</span>
-                          </div>
-                          <LinkIcon className="w-4 h-4 resource-external" />
-                        </a>
-                        <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(learningPanel.concept + ' math tutorial')}`} 
-                           target="_blank" rel="noopener noreferrer" className="resource-link">
-                          <div className="resource-icon">
-                            <PlayIcon className="w-4 h-4" />
-                          </div>
-                          <div className="resource-content">
-                            <span className="resource-title">YouTube Tutorials</span>
-                            <span className="resource-type">Video Tutorials</span>
-                          </div>
-                          <LinkIcon className="w-4 h-4 resource-external" />
-                        </a>
+                          {activeTab.difficulty}
+                        </span>
+                        <span className="time-estimate">
+                          <ClockIcon className="w-4 h-4" />
+                          {activeTab.estimatedTime}
+                        </span>
                       </div>
+                      
+                      {activeTab.description && (
+                        <p className="concept-description">{activeTab.description}</p>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* What This Enables (Leads To) */}
-                {learningPanel.leads_to && learningPanel.leads_to.length > 0 && (
-                  <div className="leads-to-section">
-                    <h4>🚀 What This Enables</h4>
-                    <p style={{ color: 'var(--edu-gray-600)', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                      Once you master this concept, you'll be ready to learn:
-                    </p>
-                    <div className="leads-to-list">
-                      {learningPanel.leads_to.map((nextConcept, index) => {
-                        const conceptText = typeof nextConcept === 'string' ? nextConcept : 
-                                          nextConcept?.name || nextConcept?.title || nextConcept?.description || 
-                                          `Next Concept ${index + 1}`
-                        const conceptDesc = typeof nextConcept === 'object' ? 
-                                          nextConcept?.description || '' : ''
-                        return (
-                          <div key={index} className="leads-to-item">
-                            <ArrowRightIcon className="w-4 h-4" style={{ color: 'var(--edu-secondary)' }} />
-                            <div className="leads-to-content">
-                              <span className="leads-to-title">{conceptText}</span>
-                              {conceptDesc && (
-                                <span className="leads-to-description">{conceptDesc}</span>
-                              )}
-                            </div>
+                    {/* Detailed Explanation */}
+                    {activeTab.explanation && (
+                      <div className="concept-explanation">
+                        <h4>Detailed Explanation</h4>
+                        <div className="explanation-content">
+                          {activeTab.explanation}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Prerequisites */}
+                    {activeTab.prerequisites && activeTab.prerequisites.length > 0 ? (
+                      <div className="prerequisites-section">
+                        <h4>📚 Prerequisites</h4>
+                        <p style={{ color: 'var(--edu-gray-600)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                          You should understand these concepts first:
+                        </p>
+                        <div className="prerequisites-list">
+                          {activeTab.prerequisites.map((prereq, index) => {
+                            const prereqName = typeof prereq === 'string' ? prereq : 
+                                             prereq?.name || prereq?.title || `Prerequisite ${index + 1}`
+                            const prereqDesc = typeof prereq === 'object' ? 
+                                             prereq?.description || '' : ''
+                            const prereqType = typeof prereq === 'object' ? 
+                                             prereq?.type || 'concept' : 'concept'
+                            
+                            return (
+                              <div key={index} className="prerequisite-item">
+                                <ArrowRightIcon className="w-4 h-4" style={{ color: 'var(--edu-primary)' }} />
+                                <div className="prerequisite-content">
+                                  <span className="prerequisite-title">{prereqName}</span>
+                                  {prereqDesc && (
+                                    <span className="prerequisite-description">{prereqDesc}</span>
+                                  )}
+                                  <span className="prerequisite-type">{prereqType}</span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="no-prerequisites">
+                        <p>No prerequisites found for this concept.</p>
+                      </div>
+                    )}
+
+                    {/* Examples */}
+                    {activeTab.examples && activeTab.examples.length > 0 && (
+                      <div className="examples-section">
+                        <h4>💡 Examples</h4>
+                        <div className="examples-list">
+                          {activeTab.examples.map((example, index) => {
+                            const exampleText = typeof example === 'string' ? example : 
+                                              example?.name || example?.title || example?.description || 
+                                              `Example ${index + 1}`
+                            return (
+                              <div key={index} className="example-item">
+                                <DocumentTextIcon className="w-4 h-4" />
+                                <span>{exampleText}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Learning Resources */}
+                    <div className="resources-section">
+                      <div className="resources-header">
+                        <h4>📖 Learning Resources</h4>
+                        <button 
+                          className="search-resources-btn"
+                          onClick={() => searchLearningResources(activeTab.concept, activeTab.id)}
+                          disabled={searchingResources}
+                        >
+                          {searchingResources ? (
+                            <>
+                              <div className="mini-spinner"></div>
+                              Searching...
+                            </>
+                          ) : (
+                            <>
+                              🔍 Search More Resources
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* API Resources */}
+                      {activeTab.resources && activeTab.resources.length > 0 && (
+                        <div className="resources-group">
+                          <h5>📚 Curated Resources</h5>
+                          <div className="resources-list">
+                            {activeTab.resources.map((resource, index) => {
+                              const youtubeId = extractYouTubeId(resource.url || '')
+                              
+                              if (youtubeId) {
+                                return (
+                                  <div key={index} className="youtube-resource">
+                                    <div className="youtube-header">
+                                      <PlayIcon className="w-4 h-4" />
+                                      <span className="resource-title">{resource.title || resource.name}</span>
+                                    </div>
+                                    <div className="youtube-player">
+                                      <iframe
+                                        src={`https://www.youtube.com/embed/${youtubeId}?rel=0`}
+                                        frameBorder="0"
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        allowFullScreen
+                                        title={resource.title || 'YouTube Video'}
+                                      ></iframe>
+                                    </div>
+                                  </div>
+                                )
+                              }
+                              
+                              return (
+                                <a 
+                                  key={index}
+                                  href={resource.url || '#'}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="resource-link"
+                                >
+                                  <div className="resource-icon">
+                                    <GlobeAltIcon className="w-4 h-4" />
+                                  </div>
+                                  <div className="resource-content">
+                                    <span className="resource-title">{resource.title || resource.name}</span>
+                                    <span className="resource-type">{resource.type || 'Article'}</span>
+                                  </div>
+                                  <LinkIcon className="w-4 h-4 resource-external" />
+                                </a>
+                              )
+                            })}
                           </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
+                        </div>
+                      )}
 
-                {/* Error Message */}
-                {learningPanel.error && (
-                  <div className="panel-error">
-                    <p>{learningPanel.error}</p>
-                  </div>
+                      {/* Searched Resources */}
+                      {searchedResources[activeTab.id] && searchedResources[activeTab.id].length > 0 && (
+                        <div className="resources-group">
+                          <h5>🔍 Search Results</h5>
+                          <div className="resources-list">
+                            {searchedResources[activeTab.id].map((resource, index) => {
+                              const youtubeId = extractYouTubeId(resource.url || '')
+                              
+                              if (youtubeId) {
+                                return (
+                                  <div key={`search-${index}`} className="youtube-resource">
+                                    <div className="youtube-header">
+                                      <PlayIcon className="w-4 h-4" />
+                                      <span className="resource-title">{resource.title || resource.name}</span>
+                                    </div>
+                                    <div className="youtube-player">
+                                      <iframe
+                                        src={`https://www.youtube.com/embed/${youtubeId}?rel=0`}
+                                        frameBorder="0"
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        allowFullScreen
+                                        title={resource.title || 'YouTube Video'}
+                                      ></iframe>
+                                    </div>
+                                  </div>
+                                )
+                              }
+                              
+                              return (
+                                <a 
+                                  key={`search-${index}`}
+                                  href={resource.url || '#'}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="resource-link"
+                                >
+                                  <div className="resource-icon">
+                                    {resource.type === 'video' ? (
+                                      <PlayIcon className="w-4 h-4" />
+                                    ) : (
+                                      <GlobeAltIcon className="w-4 h-4" />
+                                    )}
+                                  </div>
+                                  <div className="resource-content">
+                                    <span className="resource-title">{resource.title || resource.name}</span>
+                                    <span className="resource-type">{resource.type || 'Article'}</span>
+                                    {resource.description && (
+                                      <span className="resource-description">{resource.description}</span>
+                                    )}
+                                  </div>
+                                  <LinkIcon className="w-4 h-4 resource-external" />
+                                </a>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Default Resources */}
+                      {(!activeTab.resources || activeTab.resources.length === 0) && 
+                       (!searchedResources[activeTab.id] || searchedResources[activeTab.id].length === 0) && (
+                        <div className="no-resources">
+                          <p>General study materials:</p>
+                          <div className="general-resources">
+                            <a href={`https://www.khanacademy.org/search?query=${encodeURIComponent(activeTab.concept)}`} 
+                               target="_blank" rel="noopener noreferrer" className="resource-link">
+                              <div className="resource-icon">
+                                <GlobeAltIcon className="w-4 h-4" />
+                              </div>
+                              <div className="resource-content">
+                                <span className="resource-title">Khan Academy</span>
+                                <span className="resource-type">Educational Platform</span>
+                              </div>
+                              <LinkIcon className="w-4 h-4 resource-external" />
+                            </a>
+                            <a href={`https://www.youtube.com/results?search_query=${encodeURIComponent(activeTab.concept + ' math tutorial')}`} 
+                               target="_blank" rel="noopener noreferrer" className="resource-link">
+                              <div className="resource-icon">
+                                <PlayIcon className="w-4 h-4" />
+                              </div>
+                              <div className="resource-content">
+                                <span className="resource-title">YouTube Tutorials</span>
+                                <span className="resource-type">Video Tutorials</span>
+                              </div>
+                              <LinkIcon className="w-4 h-4 resource-external" />
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* What This Enables (Leads To) */}
+                    {activeTab.leads_to && activeTab.leads_to.length > 0 && (
+                      <div className="leads-to-section">
+                        <h4>🚀 What This Enables</h4>
+                        <p style={{ color: 'var(--edu-gray-600)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                          Once you master this concept, you'll be ready to learn:
+                        </p>
+                        <div className="leads-to-list">
+                          {activeTab.leads_to.map((nextConcept, index) => {
+                            const conceptText = typeof nextConcept === 'string' ? nextConcept : 
+                                              nextConcept?.name || nextConcept?.title || nextConcept?.description || 
+                                              `Next Concept ${index + 1}`
+                            const conceptDesc = typeof nextConcept === 'object' ? 
+                                              nextConcept?.description || '' : ''
+                            return (
+                              <div key={index} className="leads-to-item">
+                                <ArrowRightIcon className="w-4 h-4" style={{ color: 'var(--edu-secondary)' }} />
+                                <div className="leads-to-content">
+                                  <span className="leads-to-title">{conceptText}</span>
+                                  {conceptDesc && (
+                                    <span className="leads-to-description">{conceptDesc}</span>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error Message */}
+                    {activeTab.error && (
+                      <div className="panel-error">
+                        <p>{activeTab.error}</p>
+                      </div>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 

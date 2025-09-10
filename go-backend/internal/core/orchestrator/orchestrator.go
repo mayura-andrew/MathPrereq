@@ -15,9 +15,11 @@ import (
 
 	"github.com/mathprereq/internal/core/config"
 	"github.com/mathprereq/internal/core/llm"
+	"github.com/mathprereq/internal/data/mongodb"
 	"github.com/mathprereq/internal/data/neo4j"
 	"github.com/mathprereq/internal/data/weaviate"
 	"github.com/mathprereq/pkg/logger"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
@@ -55,6 +57,7 @@ type Orchestrator struct {
 	knowledgeGraph *neo4j.Client
 	vectorStore    *weaviate.Client
 	llmClient      *llm.Client
+	queryAnalytics *mongodb.QueryAnalytics
 	logger         *zap.Logger
 	circuitBreaker *CircuitBreaker
 }
@@ -93,19 +96,23 @@ const (
 	BaseRetryDelay        = 3 * time.Second // Increased base delay
 )
 
-func New(kg *neo4j.Client, vs *weaviate.Client, llmConfig config.LLMConfig) *Orchestrator {
+func New(kg *neo4j.Client, vs *weaviate.Client, llmConfig config.LLMConfig, mongoClient *mongo.Client, databaseName string) *Orchestrator {
 	llmClient := llm.NewClient(llmConfig)
+	queryAnalytics := mongodb.NewQueryAnalytics(mongoClient, databaseName)
 
 	return &Orchestrator{
 		knowledgeGraph: kg,
 		vectorStore:    vs,
 		llmClient:      llmClient,
+		queryAnalytics: queryAnalytics,
 		logger:         logger.MustGetLogger(),
 		circuitBreaker: &CircuitBreaker{},
 	}
 }
 
 func (o *Orchestrator) ProcessQuery(ctx context.Context, query string) (*QueryResult, error) {
+	startTime := time.Now()
+
 	// Create a context with extended timeout for the entire operation
 	queryCtx, cancel := context.WithTimeout(context.Background(), DefaultQueryTimeout)
 	defer cancel()
@@ -127,6 +134,10 @@ func (o *Orchestrator) ProcessQuery(ctx context.Context, query string) (*QueryRe
 				Explanation:        "The system is temporarily experiencing high load. Please try again in a few moments.",
 			}, nil
 		}
+
+		// Save failed query response
+		o.saveQueryResponseAsync(query, []string{}, []neo4j.Concept{}, []string{}, "", startTime, false, err.Error())
+
 		return nil, fmt.Errorf("failed to identify concepts: %w", err)
 	}
 
@@ -252,12 +263,44 @@ func (o *Orchestrator) ProcessQuery(ctx context.Context, query string) (*QueryRe
 		zap.Int("path_length", len(prerequisitePath)),
 		zap.Int("context_chunks", len(retrievedContext)))
 
+	// Save query response data asynchronously
+	o.saveQueryResponseAsync(query, concepts, prerequisitePath, retrievedContext, explanation, startTime, true, "")
+
 	return &QueryResult{
 		IdentifiedConcepts: concepts,
 		PrerequisitePath:   prerequisitePath,
 		RetrievedContext:   retrievedContext,
 		Explanation:        explanation,
 	}, nil
+}
+
+// saveQueryResponseAsync saves query response data asynchronously to MongoDB
+func (o *Orchestrator) saveQueryResponseAsync(query string, concepts []string, prerequisitePath []neo4j.Concept, retrievedContext []string, explanation string, startTime time.Time, success bool, errorMsg string) {
+	go func() {
+		record := &mongodb.QueryResponseRecord{
+			Query:              query,
+			IdentifiedConcepts: concepts,
+			PrerequisitePath:   prerequisitePath,
+			RetrievedContext:   retrievedContext,
+			Explanation:        explanation,
+			ResponseTime:       time.Since(startTime),
+			ProcessingSuccess:  success,
+			ErrorMessage:       errorMsg,
+			Timestamp:          time.Now(),
+			LLMProvider:        o.llmClient.GetProvider(),
+			LLMModel:           o.llmClient.GetModel(),
+			KnowledgeGraphHits: len(prerequisitePath),
+			VectorStoreHits:    len(retrievedContext),
+		}
+
+		// Use a separate context for saving (with timeout)
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer saveCancel()
+
+		if err := o.queryAnalytics.SaveQueryResponse(saveCtx, record); err != nil {
+			o.logger.Warn("Failed to save query response", zap.Error(err))
+		}
+	}()
 }
 
 // Enhanced retry mechanism with adaptive timeouts and circuit breaker
@@ -500,6 +543,11 @@ func (o *Orchestrator) GetAllConcepts(ctx context.Context) ([]neo4j.Concept, err
 
 	o.logger.Info("Successfully retrieved concepts", zap.Int("count", len(concepts)))
 	return concepts, nil
+}
+
+// GetQueryStats returns statistics about stored queries
+func (o *Orchestrator) GetQueryStats(ctx context.Context) (map[string]interface{}, error) {
+	return o.queryAnalytics.GetQueryStats(ctx)
 }
 
 // Helper method to detect truncated explanations

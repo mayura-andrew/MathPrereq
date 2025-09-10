@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -322,6 +323,42 @@ func (h *Handlers) ScrapeAndGetLearningResources(c *gin.Context) {
 		"total_resources": len(existingResources),
 		"resources":       existingResources,
 		"processing_time": processingTime.String(),
+	})
+}
+
+// GetQueryAnalytics returns query analytics data
+func (h *Handlers) GetQueryAnalytics(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	// Get query statistics
+	stats, err := h.orchestrator.GetQueryStats(ctx)
+	if err != nil {
+		h.logger.Error("Failed to get query stats", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve query analytics",
+		})
+		return
+	}
+
+	// Get popular concepts
+	popularConcepts, err := h.orchestrator.GetPopularConcepts(ctx, 10)
+	if err != nil {
+		h.logger.Warn("Failed to get popular concepts", zap.Error(err))
+		popularConcepts = []map[string]interface{}{}
+	}
+
+	// Get query trends for the last 7 days
+	queryTrends, err := h.orchestrator.GetQueryTrends(ctx, 7)
+	if err != nil {
+		h.logger.Warn("Failed to get query trends", zap.Error(err))
+		queryTrends = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"stats":            stats,
+		"popular_concepts": popularConcepts,
+		"query_trends":     queryTrends,
 	})
 }
 

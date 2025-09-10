@@ -21,6 +21,7 @@ import (
 	"github.com/mathprereq/internal/data/scraper"
 	"github.com/mathprereq/internal/data/weaviate"
 	"github.com/mathprereq/pkg/logger"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
 )
 
@@ -72,14 +73,24 @@ func main() {
 		}
 	}()
 
-	// // Test MongoDB connection with longer timeout
-	// testCtx, testCancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased to 60s
-	// defer testCancel()
+	// Test MongoDB connection with authentication verification
+	testCtx, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer testCancel()
 
-	// if err := mongoClient.Ping(testCtx); err != nil {
-	// 	zapLogger.Fatal("Failed to ping MongoDB", zap.Error(err))
-	// }
+	if err := mongoClient.Ping(testCtx); err != nil {
+		zapLogger.Fatal("Failed to ping MongoDB", zap.Error(err))
+	}
 	zapLogger.Info("MongoDB connection verified successfully")
+
+	// Additional authentication test - try a simple database operation
+	testDB := mongoClient.GetMongoClient().Database(mongoConfig.Database)
+	collections, err := testDB.ListCollectionNames(testCtx, bson.M{})
+	if err != nil {
+		zapLogger.Warn("MongoDB authentication test failed - collections list", zap.Error(err))
+	} else {
+		zapLogger.Info("MongoDB authentication verified - can list collections", zap.Int("collections", len(collections)))
+	}
+
 	// Initialize web scraper (integrated into main server)
 	var webScraper *scraper.EducationalWebScraper
 	if mongoClient != nil {
@@ -103,13 +114,26 @@ func main() {
 			webScraper = nil
 		} else {
 			zapLogger.Info("Web scraper initialized successfully with shared MongoDB client")
+
+			// Test the scraper's MongoDB connection
+			testCtx, testCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer testCancel()
+
+			// Test if scraper can access MongoDB
+			testCollection := mongoClient.GetMongoClient().Database(scraperConfig.DatabaseName).Collection(scraperConfig.CollectionName)
+			count, err := testCollection.CountDocuments(testCtx, bson.M{})
+			if err != nil {
+				zapLogger.Warn("Scraper MongoDB test failed - cannot count documents", zap.Error(err))
+			} else {
+				zapLogger.Info("Scraper MongoDB test passed - can access collection", zap.Int64("documents", count))
+			}
 		}
 	} else {
 		zapLogger.Warn("MongoDB client not available, skipping web scraper initialization")
 	}
 
 	// Initialize orchestrator
-	orchestrator := orchestrator.New(neo4jClient, weaviateClient, cfg.LLM)
+	orchestrator := orchestrator.New(neo4jClient, weaviateClient, cfg.LLM, mongoClient.GetMongoClient(), mongoConfig.Database)
 
 	// Initialize handlers with MongoDB client and web scraper
 	handlers := handlers.New(orchestrator, mongoClient, webScraper, zapLogger)

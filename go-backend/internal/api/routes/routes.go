@@ -53,6 +53,9 @@ func Setup(router *gin.Engine, h *handlers.Handlers) {
 		// Standard timeout for other endpoints
 		v1.GET("/concepts", h.ListConcepts)
 		v1.GET("/health-detailed", h.HealthCheck)
+
+		// Query analytics endpoint
+		router.GET("/api/v1/analytics/queries", handlers.GetQueryAnalytics)
 	}
 
 	// Root endpoint
