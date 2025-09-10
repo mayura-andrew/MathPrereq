@@ -87,7 +87,7 @@ const LearningPath = ({ learningPath }) => {
 
     try {
       // Get detailed concept information using the correct API endpoint
-      const conceptDetail = await mathAPI.getConceptDetail(concept.name)
+      const conceptDetail = await mathAPI.processQuery(concept.name)
       
       // Update the specific tab with loaded data
       setLearningTabs(prev => prev.map(tab => 

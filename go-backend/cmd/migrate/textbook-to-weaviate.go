@@ -13,7 +13,7 @@ import (
 )
 
 func runTextbookToWeaviateMigration() error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

@@ -1,14 +1,43 @@
 package models
 
-import (
-	"time"
+import "time"
 
-	"github.com/mathprereq/internal/data/scraper"
-)
+type ErrorResponse struct {
+	Success   bool      `json:"success"`
+	Error     string    `json:"error"`
+	RequestID string    `json:"request_id"`
+	Timestamp time.Time `json:"timestamp"`
+}
 
 type QueryRequest struct {
-	Question string `json:"question" binding:"required,min=1,max=500"`
-	Context  string `json:"context,omitempty"`
+	UserID   string `json:"user_id,omitempty" validate:"omitempty,uuid"`
+	Question string `json:"question" validate:"required,min=3,max=1000"`
+}
+
+type QueryResponse struct {
+	Success            bool          `json:"success"`
+	Query              string        `json:"query"`
+	IdentifiedConcepts []string      `json:"identified_concepts"`
+	LearningPath       LearningPath  `json:"learning_path"`
+	Explanation        string        `json:"explanation"`
+	RetrievedContext   []string      `json:"retrieved_context"`
+	ProcessingTime     time.Duration `json:"processing_time"`
+	RequestID          string        `json:"request_id"`
+	ErrorMessage       *string       `json:"error_message,omitempty"`
+}
+
+type ConceptDetailRequest struct {
+	ConceptID string `json:"concept_id" validate:"required"`
+}
+
+type ConceptDetailResponse struct {
+	Success             bool          `json:"success"`
+	Concept             *ConceptInfo  `json:"concept,omitempty"`
+	Prerequisites       []ConceptInfo `json:"prerequisites"`
+	LeadsTo             []ConceptInfo `json:"leads_to"`
+	DetailedExplanation string        `json:"detailed_explanation"`
+	RequestID           string        `json:"request_id"`
+	ErrorMessage        *string       `json:"error_message,omitempty"`
 }
 
 type ConceptInfo struct {
@@ -22,39 +51,4 @@ type LearningPath struct {
 	Concepts      []ConceptInfo `json:"concepts"`
 	TotalConcepts int           `json:"total_concepts"`
 	PathType      string        `json:"path_type"`
-}
-
-type QueryResponse struct {
-	Success            bool          `json:"success"`
-	Query              string        `json:"query"`
-	IdentifiedConcepts []string      `json:"identified_concepts"`
-	LearningPath       LearningPath  `json:"learning_path"`
-	Explanation        string        `json:"explanation"`
-	RetrievedContext   []string      `json:"retrieved_context"`
-	ProcessingTime     time.Duration `json:"processing_time"`
-	ErrorMessage       *string       `json:"error_message,omitempty"`
-}
-
-type ConceptDetailRequest struct {
-	ConceptID string `json:"concept_id" binding:"required"`
-}
-
-type ConceptDetailResponse struct {
-	Success             bool                          `json:"success"`
-	Concept             *ConceptInfo                  `json:"concept,omitempty"`
-	Prerequisites       []ConceptInfo                 `json:"prerequisites"`
-	LeadsTo             []ConceptInfo                 `json:"leads_to"`
-	LearningResources   []scraper.EducationalResource `json:"learning_resources"`
-	DetailedExplanation string                        `json:"detailed_explanation"`
-	ErrorMessage        *string                       `json:"error_message,omitempty"`
-}
-
-type HealthResponse struct {
-	Status               string `json:"status"`
-	Service              string `json:"service"`
-	KnowledgeGraphLoaded bool   `json:"kg_loaded"`
-	VectorStoreLoaded    bool   `json:"vector_store_loaded"`
-	TotalConcepts        int    `json:"total_concepts"`
-	TotalChunks          int    `json:"total_chunks"`
-	Uptime               string `json:"uptime"`
 }

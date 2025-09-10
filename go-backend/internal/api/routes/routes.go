@@ -1,69 +1,131 @@
 package routes
 
 import (
-	"context"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/mathprereq/internal/api/handlers"
 	"github.com/mathprereq/internal/api/middleware"
+	"github.com/mathprereq/internal/container"
+	"github.com/mathprereq/internal/core/config"
+	"go.uber.org/zap"
 )
 
-// Request timeout middleware for long-running operations
-func RequestTimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-		defer cancel()
-
-		c.Request = c.Request.WithContext(ctx)
-		c.Next()
+func SetupRoutes(
+	container container.Container,
+	cfg *config.Config,
+	logger *zap.Logger,
+) *gin.Engine {
+	// Set Gin mode based on environment
+	if cfg.Server.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
 	}
-}
 
-func Setup(router *gin.Engine, h *handlers.Handlers) {
-	// Middleware
-	router.Use(gin.Logger())
-	router.Use(gin.Recovery())
+	router := gin.New()
 
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-	}))
-	router.Use(middleware.Logger())
+	// Global middleware
+	router.Use(middleware.RequestID())
+	router.Use(middleware.RequestLogger(logger))
+	router.Use(middleware.Recovery(logger))
+	router.Use(middleware.CORS())
+	router.Use(middleware.SecurityHeaders())
 
-	// Health check
-	router.GET("/health", h.HealthCheck)
+	// Initialize handlers
+	handler := handlers.NewHandler(container, logger)
 
-	// API routes with extended timeout for query operations
+	// Health checks (no timeout)
+	router.GET("/health", handler.HealthCheck)
+	router.GET("/api/v1/health", handler.HealthCheck)
+	router.GET("/api/v1/health-detailed", handler.HealthCheck)
+
+	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
-		// Apply extended timeout to query and learning resources endpoints
-		extendedTimeoutGroup := v1.Group("/")
-		extendedTimeoutGroup.Use(RequestTimeoutMiddleware(10 * time.Minute)) // Extended timeout
+		// Query processing
+		v1.POST("/query",
+			middleware.Timeout(45*time.Second),
+			handler.ProcessQuery)
+
+		// Concept operations
+		v1.POST("/concept-detail",
+			middleware.Timeout(15*time.Second),
+			handler.GetConceptDetail)
+
+		v1.GET("/concepts",
+			middleware.Timeout(30*time.Second),
+			handler.ListConcepts)
+
+		// Learning Resources (New Feature)
+		resources := v1.Group("/resources")
 		{
-			extendedTimeoutGroup.POST("/query", h.ProcessQuery)
-			extendedTimeoutGroup.POST("/concept-detail", h.GetConceptDetail)
-			extendedTimeoutGroup.POST("/learning-resources", h.ScrapeAndGetLearningResources) // Simplified endpoint
+			// Find and scrape resources for a concept (triggered by button click)
+			resources.POST("/find/:concept",
+				middleware.Timeout(60*time.Second), // Longer timeout for scraping
+				handler.FindResourcesForConcept)
+
+			// Get stored resources for a concept
+			resources.GET("/concept/:concept",
+				middleware.Timeout(15*time.Second),
+				handler.GetResourcesForConcept)
+
+			// Get all resources with pagination and filtering
+			resources.GET("/",
+				middleware.Timeout(30*time.Second),
+				handler.ListResources)
+
+			// Get resource statistics and analytics
+			resources.GET("/stats",
+				middleware.Timeout(15*time.Second),
+				handler.GetResourceStats)
+
+			// Bulk find resources for multiple concepts
+			resources.POST("/find-batch",
+				middleware.Timeout(120*time.Second), // Extended for batch operations
+				handler.FindResourcesForConcepts)
 		}
 
-		// Standard timeout for other endpoints
-		v1.GET("/concepts", h.ListConcepts)
-		v1.GET("/health-detailed", h.HealthCheck)
-
-		// Query analytics endpoint
-		router.GET("/api/v1/analytics/queries", handlers.GetQueryAnalytics)
 	}
 
-	// Root endpoint
-	router.GET("/", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "Mathematics Learning Framework API",
-			"version": "0.1.0",
-			"docs":    "/docs",
-		})
-	})
+	// Debug routes (only in development)
+	if cfg.Server.Environment == "development" {
+		debug := router.Group("/debug")
+		{
+			debug.GET("/config", func(c *gin.Context) {
+				// Return sanitized config (without sensitive info)
+				sanitizedCfg := *cfg
+				sanitizedCfg.MongoDB.URI = maskSensitive(cfg.MongoDB.URI)
+				sanitizedCfg.Neo4j.Password = "***"
+				sanitizedCfg.LLM.APIKey = "***"
+				sanitizedCfg.Weaviate.APIKey = "***"
+				c.JSON(200, sanitizedCfg)
+			})
+
+			debug.GET("/health-check", func(c *gin.Context) {
+				health := container.HealthCheck(c.Request.Context())
+				c.JSON(200, gin.H{
+					"health_status": health,
+					"all_healthy":   allHealthy(health),
+				})
+			})
+		}
+	}
+
+	return router
+}
+
+func maskSensitive(uri string) string {
+	// Simple masking for URIs containing credentials
+	if len(uri) > 20 {
+		return uri[:10] + "***" + uri[len(uri)-7:]
+	}
+	return "***"
+}
+
+func allHealthy(health map[string]bool) bool {
+	for _, healthy := range health {
+		if !healthy {
+			return false
+		}
+	}
+	return true
 }
