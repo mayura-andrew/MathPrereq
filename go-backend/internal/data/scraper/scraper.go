@@ -331,6 +331,48 @@ func (s *EducationalWebScraper) generateConceptID(conceptName string) string {
 	return reg.ReplaceAllString(id, "")
 }
 
+// normalizeConceptForSearch normalizes concept names for better search results
+func (s *EducationalWebScraper) normalizeConceptForSearch(concept string) string {
+	// Remove extra spaces and normalize
+	normalized := strings.TrimSpace(concept)
+	normalized = regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")
+	
+	// Convert to title case for better search results
+	words := strings.Fields(strings.ToLower(normalized))
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(string(word[0])) + word[1:]
+		}
+	}
+	normalized = strings.Join(words, " ")
+	
+	return normalized
+}
+
+// generateSearchTerms creates multiple search variations for better results
+func (s *EducationalWebScraper) generateSearchTerms(concept string) []string {
+	normalized := s.normalizeConceptForSearch(concept)
+	
+	terms := []string{
+		normalized,                           // "Basic Functions"
+		normalized + " mathematics",          // "Basic Functions mathematics"
+		normalized + " math tutorial",        // "Basic Functions math tutorial"
+	}
+	
+	// Add variations for multi-word concepts
+	if strings.Contains(normalized, " ") {
+		// Remove common words that might confuse search
+		withoutCommon := regexp.MustCompile(`\b(Basic|Advanced|Elementary|Introduction|to|the|of|and|in)\b`).ReplaceAllString(normalized, "")
+		withoutCommon = regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(withoutCommon), " ")
+		
+		if withoutCommon != "" && withoutCommon != normalized {
+			terms = append(terms, withoutCommon)
+		}
+	}
+	
+	return terms
+}
+
 // isRecentlyScraped checks if a concept was scraped recently
 func (s *EducationalWebScraper) isRecentlyScraped(ctx context.Context, conceptID string) bool {
 	// Check if scraped within last 24 hours
@@ -454,24 +496,26 @@ func (s *EducationalWebScraper) searchYouTube(ctx context.Context, conceptID, co
 
 	s.logger.Info("Searching YouTube", zap.String("concept", conceptName))
 
-	searchTerms := []string{
-		fmt.Sprintf("%s calculus tutorial", conceptName),
-		fmt.Sprintf("%s math explained", conceptName),
-		fmt.Sprintf("learn %s mathematics", conceptName),
-	}
-
+	searchTerms := s.generateSearchTerms(conceptName)
 	var allResources []EducationalResource
 
 	for i, searchTerm := range searchTerms {
-		if i >= 2 { // Limit to 2 searches per concept
+		if i >= 2 { // Limit to 2 searches per concept to avoid rate limits
 			break
 		}
 
+		// Create shorter timeout for individual searches
+		searchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		
 		searchURL := fmt.Sprintf("https://www.youtube.com/results?search_query=%s", url.QueryEscape(searchTerm))
 
-		resources, err := s.scrapeYouTubeResults(ctx, searchURL, conceptID, conceptName)
+		resources, err := s.scrapeYouTubeResults(searchCtx, searchURL, conceptID, conceptName)
+		cancel()
+
 		if err != nil {
-			s.logger.Warn("YouTube search failed", zap.String("term", searchTerm), zap.Error(err))
+			s.logger.Warn("YouTube search failed", 
+				zap.String("term", searchTerm), 
+				zap.Error(err))
 			continue
 		}
 
@@ -481,7 +525,12 @@ func (s *EducationalWebScraper) searchYouTube(ctx context.Context, conceptID, co
 		time.Sleep(time.Second)
 	}
 
-	return allResources[:min(len(allResources), 5)], nil // Top 5 results
+	// Limit results and deduplicate
+	if len(allResources) > 5 {
+		allResources = allResources[:5]
+	}
+
+	return s.deduplicateResources(allResources), nil
 }
 
 // scrapeYouTubeResults scrapes YouTube search results page

@@ -87,7 +87,7 @@ const LearningPath = ({ learningPath }) => {
 
     try {
       // Get detailed concept information using the correct API endpoint
-      const conceptDetail = await mathAPI.processQuery(concept.name)
+      const conceptDetail = await mathAPI.smartConceptQuery(concept.name)
       
       // Extract prerequisites from learning_path.concepts if available
       let prerequisites = conceptDetail.prerequisites || []

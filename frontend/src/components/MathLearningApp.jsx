@@ -30,7 +30,7 @@ const MathLearningApp = () => {
     setCurrentQuestion(question)
     setLoading(true)
     try {
-      const response = await mathAPI.queryWithResources(question)
+      const response = await mathAPI.processQuery(question)
       console.log('API Response:', response) // Debug log
       setCurrentAnswer(response)
       setPhase('answer')
