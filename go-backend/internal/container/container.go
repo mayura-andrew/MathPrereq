@@ -11,6 +11,7 @@ import (
 	"github.com/mathprereq/internal/core/llm"
 	"github.com/mathprereq/internal/data/mongodb"
 	"github.com/mathprereq/internal/data/neo4j"
+	"github.com/mathprereq/internal/data/scraper"
 	"github.com/mathprereq/internal/data/weaviate"
 	"github.com/mathprereq/internal/domain/repositories"
 	domainServices "github.com/mathprereq/internal/domain/services"
@@ -29,6 +30,9 @@ type Container interface {
 	// GetRawMongoClient returns the raw MongoDB client for resource operations
 	GetRawMongoClient() *mongo.Client
 
+	// GetResourceScraper returns the web scraper for educational resources
+	GetResourceScraper() *scraper.EducationalWebScraper
+
 	// Health check for all services
 	HealthCheck(ctx context.Context) map[string]bool
 
@@ -45,6 +49,9 @@ type AppContainer struct {
 	neo4jClient    *neo4j.Client
 	weaviateClient *weaviate.Client
 	llmClient      *llm.Client
+
+	// Web scraper
+	resourceScraper *scraper.EducationalWebScraper
 
 	// Repositories
 	conceptRepo repositories.ConceptRepository
@@ -73,6 +80,11 @@ func NewContainer(cfg *config.Config) (Container, error) {
 
 	if err := container.initializeServices(); err != nil {
 		return nil, fmt.Errorf("failed to initialize services: %w", err)
+	}
+
+	// Initialize web scraper after services
+	if err := container.initializeScraper(); err != nil {
+		return nil, fmt.Errorf("failed to initialize scraper: %w", err)
 	}
 
 	logger.Info("Dependency injection container initialized successfully")
@@ -185,16 +197,76 @@ func (c *AppContainer) initializeServices() error {
 	// Create LLM adapter
 	llmAdapter := services.NewLLMAdapter(c.llmClient)
 
-	// Initialize query service with all dependencies
+	// Initialize query service with all dependencies (scraper will be added later)
 	c.queryService = services.NewQueryService(
 		c.conceptRepo,
 		c.queryRepo,
 		c.vectorRepo,
 		llmAdapter,
+		nil, // scraper will be set after initialization
 		c.logger,
 	)
 
 	c.logger.Info("All services initialized successfully")
+	return nil
+}
+
+// initializeScraper initializes the web scraper for educational resources
+func (c *AppContainer) initializeScraper() error {
+	c.logger.Info("Initializing resource scraper")
+
+	// Get raw MongoDB client for scraper
+	rawClient := c.GetRawMongoClient()
+	if rawClient == nil {
+		c.logger.Error("Cannot initialize scraper: raw MongoDB client not available")
+		return fmt.Errorf("raw MongoDB client not available for scraper")
+	}
+
+	// Create scraper configuration
+	scraperConfig := scraper.ScraperConfig{
+		MaxConcurrentRequests: 5,
+		RequestTimeout:        30 * time.Second,
+		RateLimit:             2.0, // 2 requests per second
+		UserAgent:             "MathPrereq-ResourceFinder/2.0",
+		DatabaseName:          "mathprereq",
+		CollectionName:        "educational_resources",
+		MaxRetries:            3,
+		RetryDelay:            2 * time.Second,
+	}
+
+	// Initialize scraper with shared MongoDB client
+	resourceScraper, err := scraper.New(scraperConfig, rawClient)
+	if err != nil {
+		return fmt.Errorf("failed to initialize resource scraper: %w", err)
+	}
+
+	c.resourceScraper = resourceScraper
+
+	// Now update the query service with the scraper
+	if err := c.updateQueryServiceWithScraper(); err != nil {
+		return fmt.Errorf("failed to update query service with scraper: %w", err)
+	}
+
+	c.logger.Info("Resource scraper initialized successfully")
+	return nil
+}
+
+// updateQueryServiceWithScraper adds the scraper to the existing query service
+func (c *AppContainer) updateQueryServiceWithScraper() error {
+	// Create LLM adapter
+	llmAdapter := services.NewLLMAdapter(c.llmClient)
+
+	// Recreate query service with the scraper
+	c.queryService = services.NewQueryService(
+		c.conceptRepo,
+		c.queryRepo,
+		c.vectorRepo,
+		llmAdapter,
+		c.resourceScraper,
+		c.logger,
+	)
+
+	c.logger.Info("Query service updated with resource scraper")
 	return nil
 }
 
@@ -232,6 +304,11 @@ func (c *AppContainer) GetRawMongoClient() *mongo.Client {
 
 	c.logger.Debug("Raw MongoDB client authentication verified")
 	return rawClient
+}
+
+// GetResourceScraper returns the web scraper for educational resources
+func (c *AppContainer) GetResourceScraper() *scraper.EducationalWebScraper {
+	return c.resourceScraper
 }
 
 // Health check for all components

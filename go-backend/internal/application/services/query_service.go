@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/mathprereq/internal/data/scraper"
 	"github.com/mathprereq/internal/domain/entities"
 	"github.com/mathprereq/internal/domain/repositories"
 	"github.com/mathprereq/internal/domain/services"
@@ -13,11 +15,12 @@ import (
 )
 
 type queryService struct {
-	conceptRepo repositories.ConceptRepository
-	queryRepo   repositories.QueryRepository
-	vectorRepo  repositories.VectorRepository
-	llmClient   LLMClient
-	logger      *zap.Logger
+	conceptRepo     repositories.ConceptRepository
+	queryRepo       repositories.QueryRepository
+	vectorRepo      repositories.VectorRepository
+	llmClient       LLMClient
+	resourceScraper *scraper.EducationalWebScraper
+	logger          *zap.Logger
 }
 
 // LLMClient interface for the service layer
@@ -40,14 +43,16 @@ func NewQueryService(
 	queryRepo repositories.QueryRepository,
 	vectorRepo repositories.VectorRepository,
 	llmClient LLMClient,
+	resourceScraper *scraper.EducationalWebScraper,
 	logger *zap.Logger,
 ) services.QueryService {
 	return &queryService{
-		conceptRepo: conceptRepo,
-		queryRepo:   queryRepo,
-		vectorRepo:  vectorRepo,
-		llmClient:   llmClient,
-		logger:      logger,
+		conceptRepo:     conceptRepo,
+		queryRepo:       queryRepo,
+		vectorRepo:      vectorRepo,
+		llmClient:       llmClient,
+		resourceScraper: resourceScraper,
+		logger:          logger,
 	}
 }
 
@@ -109,7 +114,12 @@ func (s *queryService) processQueryPipeline(ctx context.Context, query *entities
 	query.PrerequisitePath = prereqPath
 	result.PrerequisitePath = prereqPath
 
-	// Step 3: Vector search
+	// Step 3: Start background resource scraping for concepts (non-blocking)
+	if s.resourceScraper != nil && len(conceptNames) > 0 {
+		go s.scrapeResourcesAsync(ctx, conceptNames, query.ID)
+	}
+
+	// Step 4: Vector search
 	stepStart = time.Now()
 	vectorResults, err := s.vectorRepo.Search(ctx, query.Text, 5)
 	query.AddProcessingStep("vector_search", time.Since(stepStart), err == nil, err)
@@ -158,6 +168,81 @@ func (s *queryService) saveQueryAsync(ctx context.Context, query *entities.Query
 				zap.String("query_id", query.ID))
 		}
 	}()
+}
+
+// scrapeResourcesAsync scrapes educational resources in the background
+func (s *queryService) scrapeResourcesAsync(ctx context.Context, conceptNames []string, queryID string) {
+	s.logger.Info("Starting background resource scraping",
+		zap.String("query_id", queryID),
+		zap.Strings("concepts", conceptNames))
+
+	// Create a background context with timeout for scraping
+	scraperCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// Limit concepts to avoid excessive scraping
+	maxConcepts := 5
+	if len(conceptNames) > maxConcepts {
+		conceptNames = conceptNames[:maxConcepts]
+		s.logger.Info("Limited concept scraping",
+			zap.Int("max_concepts", maxConcepts),
+			zap.String("query_id", queryID))
+	}
+
+	// Start scraping in background
+	if err := s.resourceScraper.ScrapeResourcesForConcepts(scraperCtx, conceptNames); err != nil {
+		s.logger.Warn("Background resource scraping failed",
+			zap.Error(err),
+			zap.String("query_id", queryID),
+			zap.Strings("concepts", conceptNames))
+	} else {
+		s.logger.Info("Background resource scraping completed successfully",
+			zap.String("query_id", queryID),
+			zap.Strings("concepts", conceptNames))
+	}
+}
+
+// GetResourcesForConcepts retrieves scraped resources for given concepts
+func (s *queryService) GetResourcesForConcepts(ctx context.Context, conceptNames []string, limit int) ([]scraper.EducationalResource, error) {
+	if s.resourceScraper == nil {
+		return nil, fmt.Errorf("resource scraper not available")
+	}
+
+	var allResources []scraper.EducationalResource
+
+	for _, conceptName := range conceptNames {
+		conceptID := s.generateConceptID(conceptName)
+		resources, err := s.resourceScraper.GetResourcesForConcept(ctx, conceptID, limit)
+		if err != nil {
+			s.logger.Warn("Failed to get resources for concept",
+				zap.String("concept", conceptName),
+				zap.Error(err))
+			continue
+		}
+		allResources = append(allResources, resources...)
+	}
+
+	// Sort by quality score (descending)
+	for i := 0; i < len(allResources)-1; i++ {
+		for j := 0; j < len(allResources)-i-1; j++ {
+			if allResources[j].QualityScore < allResources[j+1].QualityScore {
+				allResources[j], allResources[j+1] = allResources[j+1], allResources[j]
+			}
+		}
+	}
+
+	// Limit total results
+	if len(allResources) > limit {
+		allResources = allResources[:limit]
+	}
+
+	return allResources, nil
+}
+
+// generateConceptID creates a standardized concept ID (same logic as scraper)
+func (s *queryService) generateConceptID(conceptName string) string {
+	// Use same logic as scraper to ensure consistency
+	return strings.ToLower(strings.ReplaceAll(conceptName, " ", "_"))
 }
 
 // Implement remaining service methods

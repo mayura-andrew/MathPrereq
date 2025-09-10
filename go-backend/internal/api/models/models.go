@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/mathprereq/internal/data/scraper"
+)
 
 type ErrorResponse struct {
 	Success   bool      `json:"success"`
@@ -20,10 +24,15 @@ type QueryResponse struct {
 	IdentifiedConcepts []string      `json:"identified_concepts"`
 	LearningPath       LearningPath  `json:"learning_path"`
 	Explanation        string        `json:"explanation"`
-	RetrievedContext   []string      `json:"retrieved_context"`
+	RetrievedContext   []string      `json:"retrieved_context,omitempty"`
 	ProcessingTime     time.Duration `json:"processing_time"`
-	RequestID          string        `json:"request_id"`
 	ErrorMessage       *string       `json:"error_message,omitempty"`
+	RequestID          string        `json:"request_id,omitempty"`
+	Timestamp          time.Time     `json:"timestamp"`
+
+	// Educational resources found for the concepts
+	EducationalResources []scraper.EducationalResource `json:"educational_resources,omitempty"`
+	ResourcesMessage     string                        `json:"resources_message,omitempty"`
 }
 
 type ConceptDetailRequest struct {
