@@ -337,7 +337,7 @@ func (c *AppContainer) HealthCheck(ctx context.Context) map[string]bool {
 	health["mongodb"] = c.mongoClient.Ping(ctx) == nil
 	health["neo4j"] = c.neo4jClient.IsHealthy(ctx)
 	health["weaviate"] = c.weaviateClient.IsHealthy(ctx)
-	health["llm"] = c.llmClient.IsHealthy(ctx)
+	// health["llm"] = c.llmClient.IsHealthy(ctx)
 
 	// Check repositories
 	health["concept_repository"] = c.conceptRepo.IsHealthy(ctx)

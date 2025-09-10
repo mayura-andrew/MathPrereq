@@ -773,6 +773,257 @@ body {
   }
 }
 
+/* ==================== NEURAL NETWORK NODE STYLES ==================== */
+
+/* Neural Container - Clean Educational Theme */
+.neural-container {
+  width: 100%;
+  height: 500px;
+  background: linear-gradient(135deg, #fafbfc 0%, #f1f5f9 100%);
+  border-radius: 16px;
+  position: relative;
+  overflow: hidden;
+  margin: 2rem 0;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+  transition: width 0.3s ease;
+}
+
+.neural-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #64748b;
+  text-align: center;
+  padding: 2rem;
+}
+
+.empty-neuron {
+  width: 4rem;
+  height: 4rem;
+  border: 2px dashed #cbd5e1;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  color: #94a3b8;
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.neural-header {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  right: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #334155;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+}
+
+.neural-header h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+  color: #1e293b;
+}
+
+.neural-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #475569;
+}
+
+.neural-pulse {
+  width: 8px;
+  height: 8px;
+  background: #22c55e;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.neural-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.neural-canvas:active {
+  cursor: grabbing;
+}
+
+.neural-connections {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.neural-connection {
+  transition: all 0.3s ease;
+}
+
+.neural-node {
+  position: absolute;
+  border: 2px solid #e2e8f0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
+  animation: float 8s ease-in-out infinite;
+  user-select: none;
+  background: white;
+}
+
+.neural-node:hover {
+  transform: scale(1.05) translateY(-2px);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15), 0 4px 12px rgba(59, 130, 246, 0.08);
+  border-color: #3b82f6;
+}
+
+.neural-node.active {
+  animation: activate 3s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15), 0 8px 24px rgba(34, 197, 94, 0.12);
+  border-color: #22c55e;
+  background: #22c55e;
+}
+
+.neural-node.dragging {
+  transform: scale(1.1) translateY(-4px);
+  cursor: grabbing;
+  z-index: 100;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.15), 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.neural-core {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.concept-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.2;
+  color: #374151;
+  max-width: 85%;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.neural-node.active .concept-label {
+  color: white;
+}
+
+.neural-activity {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.neural-pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 120%;
+  height: 120%;
+  border: 2px solid rgba(34, 197, 94, 0.4);
+  border-radius: 50%;
+  animation: ripple 3s infinite;
+}
+
+/* Clean Educational Animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-8px) rotate(1deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-12px) rotate(-1deg);
+  }
+}
+
+@keyframes activate {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15), 0 8px 24px rgba(34, 197, 94, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.2), 0 12px 32px rgba(34, 197, 94, 0.18);
+  }
+}
+
+@keyframes ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0.8);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* Mobile responsiveness for neural network */
+@media (max-width: 768px) {
+  .neural-container {
+    height: 400px;
+    border-radius: 12px;
+  }
+  
+  .neural-header {
+    padding: 0.5rem 1rem;
+  }
+  
+  .neural-header h2 {
+    font-size: 1.125rem;
+  }
+  
+  .neural-node {
+    min-width: 50px !important;
+    min-height: 50px !important;
+  }
+  
+  .concept-label {
+    font-size: 0.55rem !important;
+  }
+}
+
 /* Responsive Design */
 @media (max-width: 640px) {
   .ai-chat-home {
@@ -2014,33 +2265,6 @@ body {
     width: 100% !important;
     left: 0 !important;
   }
-  
-  .panel-header {
-    padding: 1rem !important;
-  }
-  
-  .panel-title h3 {
-    font-size: 1.25rem !important;
-  }
-  
-  .panel-content {
-    padding: 1rem !important;
-  }
-  
-  .concept-meta {
-    flex-direction: column !important;
-    gap: 0.5rem !important;
-  }
-  
-  .step-header {
-    flex-direction: column !important;
-    align-items: stretch !important;
-  }
-  
-  .step-title {
-    margin-right: 0 !important;
-    margin-bottom: 0.75rem !important;
-  }
 }
 
 /* Saved Questions Component - Clean Educational Design */
@@ -2327,364 +2551,376 @@ body {
   }
 }
 
-/* Additional Learning Path Styles */
-.clickable-title {
-  cursor: pointer !important;
-  transition: color 0.2s ease !important;
-}
+/* ==================== NEURAL SIDE PANEL STYLES ==================== */
 
-.clickable-title:hover {
-  color: #1a73e8 !important;
-}
-
-/* Visual Roadmap (Neural Network) Styles */
-.neural-container {
-  background: white !important;
-  border-radius: 1rem !important;
-  border: 1px solid #e8eaed !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
-  overflow: hidden !important;
-  width: 100% !important;
-}
-
-.neural-empty {
-  text-align: center !important;
-  padding: 4rem 2rem !important;
-  color: #9aa0a6 !important;
-}
-
-.empty-neuron {
-  width: 4rem !important;
-  height: 4rem !important;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  border-radius: 50% !important;
+/* Neural roadmap wrapper adjustment when panel is open */
+.neural-roadmap-wrapper {
+  position: relative !important;
   display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  margin: 0 auto 1.5rem !important;
+  min-height: 600px !important;
+  overflow: hidden !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08) !important;
+}
+
+.neural-roadmap-wrapper.panel-open .neural-container {
+  width: 60% !important;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Neural side panel */
+.neural-side-panel {
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  width: 40% !important;
+  height: 100% !important;
+  background: white !important;
+  border-left: 1px solid #e2e8f0 !important;
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.08) !important;
+  z-index: 1000 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  animation: slideInRight 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border-top-right-radius: 16px !important;
+  border-bottom-right-radius: 16px !important;
+}
+
+.panel-header-neural {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
   color: white !important;
-}
-
-.neural-empty h3 {
-  font-size: 1.25rem !important;
-  font-weight: 600 !important;
-  color: #5f6368 !important;
-  margin: 0 0 0.5rem 0 !important;
-}
-
-.neural-empty p {
-  color: #9aa0a6 !important;
-  margin: 0 !important;
-}
-
-.neural-header {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: white !important;
-  padding: 1rem 1.5rem !important;
+  padding: 1.5rem 2rem !important;
   display: flex !important;
   justify-content: space-between !important;
   align-items: center !important;
+  border-top-right-radius: 16px !important;
 }
 
-.neural-header h2 {
+.panel-title-neural {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.75rem !important;
+}
+
+.panel-title-neural h3 {
   font-size: 1.25rem !important;
   font-weight: 600 !important;
   margin: 0 !important;
   color: white !important;
 }
 
-.neural-stats {
-  display: flex !important;
-  align-items: center !important;
-  gap: 0.75rem !important;
-  color: white !important;
-  font-size: 0.875rem !important;
-  font-weight: 500 !important;
-}
-
-.neural-pulse {
-  width: 0.5rem !important;
-  height: 0.5rem !important;
-  background: #10b981 !important;
-  border-radius: 50% !important;
-  animation: neuralPulse 2s infinite !important;
-}
-
-@keyframes neuralPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.2); }
-}
-
-.neural-canvas {
-  position: relative !important;
-  width: 600px !important;
-  height: 500px !important;
-  background: radial-gradient(circle at center, #f8fafc 0%, #f1f5f9 100%) !important;
-  overflow: hidden !important;
-  cursor: grab !important;
-}
-
-.neural-canvas:active {
-  cursor: grabbing !important;
-}
-
-.neural-connections {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  pointer-events: none !important;
-  z-index: 1 !important;
-}
-
-.neural-connection {
-  transition: all 0.3s ease !important;
-}
-
-.neural-node {
-  position: absolute !important;
-  border: 3px solid !important;
-  border-radius: 50% !important;
-  cursor: grab !important;
-  transition: all 0.3s ease !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 2 !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
-  animation: nodeFloat 3s ease-in-out infinite !important;
-}
-
-.neural-node:hover {
-  transform: scale(1.1) !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
-  z-index: 3 !important;
-}
-
-.neural-node:active {
-  cursor: grabbing !important;
-}
-
-.neural-node.dragging {
-  z-index: 4 !important;
-  transform: scale(1.1) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
-}
-
-.neural-node.active {
-  animation: activeNeuron 2s ease-in-out infinite !important;
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5) !important;
-}
-
-@keyframes nodeFloat {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-5px); }
-}
-
-@keyframes activeNeuron {
-  0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
-  50% { box-shadow: 0 0 30px rgba(59, 130, 246, 0.8); }
-}
-
-.neural-core {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 100% !important;
-  height: 100% !important;
-  text-align: center !important;
-  position: relative !important;
-}
-
-.concept-label {
-  font-size: 0.7rem !important;
-  font-weight: 600 !important;
-  color: #374151 !important;
-  line-height: 1.2 !important;
-  max-width: 90% !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-.neural-node.active .concept-label {
-  color: white !important;
-}
-
-.neural-activity {
-  position: absolute !important;
-  top: 50% !important;
-  left: 50% !important;
-  width: 6px !important;
-  height: 6px !important;
-  background: white !important;
-  border-radius: 50% !important;
-  transform: translate(-50%, -50%) !important;
-  animation: activityPulse 1s infinite !important;
-}
-
-@keyframes activityPulse {
-  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.5); }
-}
-
-.neural-pulse-ring {
-  position: absolute !important;
-  top: 50% !important;
-  left: 50% !important;
-  width: 120% !important;
-  height: 120% !important;
-  border: 2px solid rgba(59, 130, 246, 0.6) !important;
-  border-radius: 50% !important;
-  transform: translate(-50%, -50%) !important;
-  animation: pulseRing 2s infinite !important;
-  pointer-events: none !important;
-}
-
-@keyframes pulseRing {
-  0% {
-    transform: translate(-50%, -50%) scale(0.8);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-50%, -50%) scale(1.5);
-    opacity: 0;
-  }
-}
-
-.neural-modal {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  background: rgba(0, 0, 0, 0.5) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 1000 !important;
-  padding: 1.5rem !important;
-}
-
-.modal-neuron {
-  background: white !important;
-  border-radius: 1rem !important;
-  max-width: 400px !important;
-  width: 100% !important;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15) !important;
-  overflow: hidden !important;
-  position: relative !important;
-}
-
-.modal-close-neural {
-  position: absolute !important;
-  top: 1rem !important;
-  right: 1rem !important;
-  background: rgba(255, 255, 255, 0.9) !important;
+.panel-close-neural {
+  background: rgba(255, 255, 255, 0.15) !important;
   border: none !important;
-  border-radius: 50% !important;
+  border-radius: 8px !important;
   width: 2rem !important;
   height: 2rem !important;
   cursor: pointer !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  color: #6b7280 !important;
+  color: white !important;
   transition: all 0.2s ease !important;
-  z-index: 1 !important;
 }
 
-.modal-close-neural:hover {
-  background: rgba(255, 255, 255, 1) !important;
-  color: #374151 !important;
-  transform: scale(1.1) !important;
+.panel-close-neural:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+  transform: scale(1.05) !important;
 }
 
-.neuron-info {
+.panel-content-neural {
+  flex: 1 !important;
+  overflow-y: auto !important;
   padding: 2rem !important;
-  text-align: center !important;
+  line-height: 1.7 !important;
+  background: #fafbfc !important;
 }
 
-.neuron-indicator {
-  width: 3rem !important;
-  height: 3rem !important;
-  border-radius: 50% !important;
-  margin: 0 auto 1rem !important;
-  animation: neuronIndicatorPulse 2s infinite !important;
-}
-
-@keyframes neuronIndicatorPulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.1); opacity: 0.8; }
-}
-
-.neuron-info h3 {
-  font-size: 1.5rem !important;
-  font-weight: 600 !important;
-  color: #1f2937 !important;
-  margin: 0 0 1rem 0 !important;
-}
-
-.neuron-info p {
-  color: #6b7280 !important;
-  line-height: 1.6 !important;
-  margin: 0 0 1.5rem 0 !important;
-}
-
-.activate-button {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+.neural-complete-btn {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
   color: white !important;
   border: none !important;
-  border-radius: 0.5rem !important;
-  padding: 0.75rem 1.5rem !important;
+  border-radius: 8px !important;
+  padding: 0.5rem 1rem !important;
   font-size: 0.875rem !important;
   font-weight: 500 !important;
   cursor: pointer !important;
-  transition: all 0.2s ease !important;
-  width: 100% !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  box-shadow: 0 2px 4px rgba(34, 197, 94, 0.2) !important;
 }
 
-.activate-button:hover {
+.neural-complete-btn:hover {
   transform: translateY(-1px) !important;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
 }
 
-.activate-button.activated {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+.neural-complete-btn.completed {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2) !important;
 }
 
-.activate-button.activated:hover {
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+.neural-complete-btn.completed:hover {
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
 }
 
-/* Mobile Responsive for Neural Network */
+/* Enhanced content styling */
+.concept-overview {
+  background: white !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 2rem !important;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04) !important;
+}
+
+.concept-meta {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 1rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.difficulty-badge {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+  color: white !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  padding: 0.375rem 0.75rem !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2) !important;
+}
+
+.concept-description {
+  color: #475569 !important;
+  margin: 0 !important;
+  font-size: 1rem !important;
+  line-height: 1.6 !important;
+}
+
+.concept-explanation {
+  background: white !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 2rem !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04) !important;
+}
+
+.concept-explanation h4 {
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin: 0 0 1rem 0 !important;
+  padding-bottom: 0.5rem !important;
+  border-bottom: 2px solid #3b82f6 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.explanation-content {
+  color: #475569 !important;
+  line-height: 1.7 !important;
+}
+
+.prerequisites-section {
+  background: white !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 2rem !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04) !important;
+}
+
+.prerequisites-section h4 {
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin: 0 0 1rem 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.prerequisites-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.75rem !important;
+}
+
+.prerequisite-item {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 0.75rem !important;
+  padding: 1rem !important;
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+.prerequisite-item:hover {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08) !important;
+  transform: translateY(-1px) !important;
+}
+
+.prerequisite-content {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.25rem !important;
+}
+
+.prerequisite-title {
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  font-size: 0.9rem !important;
+  line-height: 1.4 !important;
+}
+
+.prerequisite-description {
+  font-size: 0.8rem !important;
+  color: #64748b !important;
+  line-height: 1.5 !important;
+}
+
+.prerequisite-type {
+  font-size: 0.75rem !important;
+  color: #94a3b8 !important;
+  text-transform: uppercase !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.05em !important;
+}
+
+.no-prerequisites {
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%) !important;
+  border: 1px solid #bbf7d0 !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 2rem !important;
+  text-align: center !important;
+}
+
+.no-prerequisites p {
+  color: #15803d !important;
+  margin: 0 !important;
+  font-weight: 500 !important;
+  font-size: 0.95rem !important;
+}
+
+.examples-section {
+  background: white !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 2rem !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.04) !important;
+}
+
+.examples-section h4 {
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin: 0 0 1rem 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.examples-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.75rem !important;
+}
+
+.example-item {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 0.75rem !important;
+  padding: 1rem !important;
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+.example-item:hover {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08) !important;
+  transform: translateY(-1px) !important;
+}
+
+.panel-error {
+  background: linear-gradient(135deg, #fef2f2 0%, #fefefe 100%) !important;
+  border: 1px solid #fecaca !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  margin-top: 1.5rem !important;
+}
+
+.panel-error p {
+  color: #dc2626 !important;
+  margin: 0 !important;
+  font-weight: 500 !important;
+}
+
+.panel-loading {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 4rem 2rem !important;
+  text-align: center !important;
+}
+
+.loading-spinner {
+  width: 2rem !important;
+  height: 2rem !important;
+  border: 3px solid #e2e8f0 !important;
+  border-top: 3px solid #3b82f6 !important;
+  border-radius: 50% !important;
+  animation: spin 1s linear infinite !important;
+  margin-bottom: 1rem !important;
+}
+
+.panel-loading p {
+  color: #64748b !important;
+  font-weight: 500 !important;
+  margin: 0 !important;
+  font-size: 0.95rem !important;
+}
+
+/* Mobile responsiveness for neural side panel */
 @media (max-width: 768px) {
-  .neural-canvas {
+  .neural-roadmap-wrapper {
+    border-radius: 12px !important;
+  }
+  
+  .neural-roadmap-wrapper.panel-open .neural-container {
     width: 100% !important;
-    height: 400px !important;
   }
   
-  .neural-connections {
+  .neural-side-panel {
     width: 100% !important;
-    height: 100% !important;
+    left: 0 !important;
+    border-radius: 0 !important;
+    border-top-left-radius: 12px !important;
+    border-top-right-radius: 12px !important;
   }
   
-  .neural-node {
-    min-width: 2rem !important;
-    min-height: 2rem !important;
+  .panel-header-neural {
+    border-radius: 0 !important;
+    border-top-left-radius: 12px !important;
+    border-top-right-radius: 12px !important;
+    padding: 1rem 1.5rem !important;
   }
   
-  .concept-label {
-    font-size: 0.6rem !important;
-  }
-  
-  .neuron-info {
+  .panel-content-neural {
     padding: 1.5rem !important;
-  }
-  
-  .neuron-info h3 {
-    font-size: 1.25rem !important;
   }
 }
