@@ -35,6 +35,32 @@ type QueryResponse struct {
 	ResourcesMessage     string                        `json:"resources_message,omitempty"`
 }
 
+// ConceptQueryRequest represents a smart concept query request
+type ConceptQueryRequest struct {
+	ConceptName string `json:"concept_name" binding:"required" validate:"required,min=2,max=100"`
+	UserID      string `json:"user_id,omitempty" validate:"max=50"`
+}
+
+// ConceptQueryResponse represents the response for concept queries
+type ConceptQueryResponse struct {
+	Success            bool           `json:"success"`
+	ConceptName        string         `json:"concept_name"`
+	Source             string         `json:"source"` // "cache" or "processed"
+	IdentifiedConcepts []string       `json:"identified_concepts"`
+	LearningPath       LearningPath   `json:"learning_path"`
+	Explanation        string         `json:"explanation"`
+	RetrievedContext   []string       `json:"retrieved_context,omitempty"`
+	ProcessingTime     time.Duration  `json:"processing_time"`
+	CacheAge           *time.Duration `json:"cache_age,omitempty"` // How old the cached data is
+	ErrorMessage       *string        `json:"error_message,omitempty"`
+	RequestID          string         `json:"request_id"`
+	Timestamp          time.Time      `json:"timestamp"`
+
+	// Educational resources
+	EducationalResources []scraper.EducationalResource `json:"educational_resources,omitempty"`
+	ResourcesMessage     string                        `json:"resources_message,omitempty"`
+}
+
 type ConceptDetailRequest struct {
 	ConceptID string `json:"concept_id" validate:"required"`
 }

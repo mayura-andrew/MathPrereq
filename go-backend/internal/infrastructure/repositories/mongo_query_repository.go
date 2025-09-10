@@ -5,28 +5,42 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mathprereq/internal/data/mongodb"
 	"github.com/mathprereq/internal/domain/entities"
 	"github.com/mathprereq/internal/domain/repositories"
+	"github.com/mathprereq/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 )
 
 type mongoQueryRepository struct {
-	client *mongodb.Client
-	logger *zap.Logger
+	client     *mongo.Client
+	database   *mongo.Database
+	collection *mongo.Collection
+	logger     *zap.Logger
 }
 
-func NewMongoQueryRepository(client *mongodb.Client, logger *zap.Logger) repositories.QueryRepository {
+func NewMongoQueryRepository(client *mongo.Client, dbName string, logger *zap.Logger) repositories.QueryRepository {
+	database := client.Database(dbName)
+	collection := database.Collection("queries")
+
 	return &mongoQueryRepository{
-		client: client,
-		logger: logger,
+		client:     client,
+		database:   database,
+		collection: collection,
+		logger:     logger,
 	}
 }
 
+// Helper method to get collection
+func (r *mongoQueryRepository) getCollection(name string) *mongo.Collection {
+	return r.database.Collection(name)
+}
+
 func (r *mongoQueryRepository) Save(ctx context.Context, query *entities.Query) error {
-	collection := r.client.GetCollection("queries")
+	collection := r.collection
 	_, err := collection.InsertOne(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to save query: %w", err)
@@ -34,8 +48,121 @@ func (r *mongoQueryRepository) Save(ctx context.Context, query *entities.Query) 
 	return nil
 }
 
+// FindByConceptName finds a successful query that contains the specified concept
+func (r *mongoQueryRepository) FindByConceptName(ctx context.Context, conceptName string) (*entities.Query, error) {
+	collection := r.database.Collection("queries")
+
+	// Create filter to find successful queries with the concept in identified_concepts
+	filter := bson.M{
+		"identified_concepts": bson.M{
+			"$in": []string{conceptName},
+		},
+		"success": true,
+	}
+
+	// Sort by timestamp descending to get the most recent match
+	opts := options.FindOne().SetSort(bson.D{{"timestamp", -1}})
+
+	var result bson.M
+	err := collection.FindOne(ctx, filter, opts).Decode(&result)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // No matching query found
+		}
+		return nil, fmt.Errorf("failed to find query by concept name: %w", err)
+	}
+
+	// Convert bson.M to entities.Query
+	query, err := r.bsonToQuery(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert BSON to query entity: %w", err)
+	}
+
+	return query, nil
+}
+
+// bsonToQuery converts a BSON document to a Query entity
+func (r *mongoQueryRepository) bsonToQuery(doc bson.M) (*entities.Query, error) {
+	// Extract basic fields
+	id, _ := doc["_id"].(string)
+	text, _ := doc["text"].(string)
+	userID, _ := doc["user_id"].(string)
+
+	// Handle identified_concepts
+	var identifiedConcepts []string
+	if concepts, ok := doc["identified_concepts"].(bson.A); ok {
+		for _, c := range concepts {
+			if conceptStr, ok := c.(string); ok {
+				identifiedConcepts = append(identifiedConcepts, conceptStr)
+			}
+		}
+	}
+
+	// Handle prerequisite_path
+	var prereqPath []types.Concept
+	if path, ok := doc["prerequisite_path"].(bson.A); ok {
+		for _, p := range path {
+			if pathDoc, ok := p.(bson.M); ok {
+				concept := types.Concept{
+					ID:          pathDoc["id"].(string),
+					Name:        pathDoc["name"].(string),
+					Description: pathDoc["description"].(string),
+				}
+				if conceptType, ok := pathDoc["type"].(string); ok {
+					concept.Type = conceptType
+				}
+				prereqPath = append(prereqPath, concept)
+			}
+		}
+	}
+
+	// Handle response
+	var response entities.QueryResponse
+	if resp, ok := doc["response"].(bson.M); ok {
+		if explanation, ok := resp["explanation"].(string); ok {
+			response.Explanation = explanation
+		}
+		if provider, ok := resp["llm_provider"].(string); ok {
+			response.LLMProvider = provider
+		}
+		if model, ok := resp["llm_model"].(string); ok {
+			response.LLMModel = model
+		}
+		if context, ok := resp["retrieved_context"].(bson.A); ok {
+			for _, c := range context {
+				if contextStr, ok := c.(string); ok {
+					response.RetrievedContext = append(response.RetrievedContext, contextStr)
+				}
+			}
+		}
+	}
+
+	// Handle timestamp
+	var timestamp time.Time
+	if ts, ok := doc["timestamp"].(primitive.DateTime); ok {
+		timestamp = ts.Time()
+	}
+
+	// Handle success flag
+	success, _ := doc["success"].(bool)
+
+	// Create query entity
+	query := &entities.Query{
+		ID:                 id,
+		Text:               text,
+		UserID:             userID,
+		IdentifiedConcepts: identifiedConcepts,
+		PrerequisitePath:   prereqPath,
+		Response:           response,
+		Timestamp:          timestamp,
+		Success:            success,
+	}
+
+	return query, nil
+}
+
 func (r *mongoQueryRepository) FindByID(ctx context.Context, id string) (*entities.Query, error) {
-	collection := r.client.GetCollection("queries")
+	collection := r.collection
 	var query entities.Query
 	err := collection.FindOne(ctx, bson.M{"_id": id}).Decode(&query)
 	if err != nil {
@@ -45,7 +172,7 @@ func (r *mongoQueryRepository) FindByID(ctx context.Context, id string) (*entiti
 }
 
 func (r *mongoQueryRepository) FindByUserID(ctx context.Context, userID string, limit int) ([]*entities.Query, error) {
-	collection := r.client.GetCollection("queries")
+	collection := r.collection
 
 	filter := bson.M{"user_id": userID}
 	opts := options.Find().SetLimit(int64(limit)).SetSort(bson.M{"timestamp": -1})
@@ -69,7 +196,7 @@ func (r *mongoQueryRepository) FindByUserID(ctx context.Context, userID string, 
 }
 
 func (r *mongoQueryRepository) GetQueryStats(ctx context.Context) (*repositories.QueryStats, error) {
-	collection := r.client.GetCollection("queries")
+	collection := r.collection
 
 	pipeline := []bson.M{
 		{
@@ -115,7 +242,7 @@ func (r *mongoQueryRepository) GetQueryStats(ctx context.Context) (*repositories
 }
 
 func (r *mongoQueryRepository) GetPopularConcepts(ctx context.Context, limit int) ([]repositories.ConceptPopularity, error) {
-	collection := r.client.GetCollection("queries")
+	collection := r.collection
 
 	pipeline := []bson.M{
 		{"$unwind": "$identified_concepts"},
@@ -155,7 +282,7 @@ func (r *mongoQueryRepository) GetPopularConcepts(ctx context.Context, limit int
 }
 
 func (r *mongoQueryRepository) GetQueryTrends(ctx context.Context, days int) ([]repositories.QueryTrend, error) {
-	collection := r.client.GetCollection("queries")
+	collection := r.collection
 
 	endDate := time.Now()
 	startDate := endDate.AddDate(0, 0, -days)
@@ -244,5 +371,6 @@ func (r *mongoQueryRepository) GetAnalytics(ctx context.Context, filters reposit
 }
 
 func (r *mongoQueryRepository) IsHealthy(ctx context.Context) bool {
-	return r.client.Ping(ctx) == nil
+	err := r.client.Ping(ctx, nil)
+	return err == nil
 }

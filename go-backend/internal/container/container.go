@@ -179,8 +179,26 @@ func (c *AppContainer) initializeRepositories() error {
 	c.logger.Info("Initializing repositories")
 
 	// Import the actual repository implementations
+	var mongoRepo repositories.QueryRepository
+    if c.mongoClient != nil {
+        // Extract the raw mongo.Client from your wrapper
+        rawMongoClient := c.mongoClient.GetMongoClient()
+        if rawMongoClient != nil {
+            // Use your database name from config
+            databaseName := c.config.MongoDB.Database
+            if databaseName == "" {
+                databaseName = "mathprereq" // default database name
+            }
+            mongoRepo = infrastructurerepos.NewMongoQueryRepository(rawMongoClient, databaseName, c.logger)
+		 } else {
+            c.logger.Warn("Raw MongoDB client is nil, using nil repository")
+        }
+    } else {
+        c.logger.Info("MongoDB client not initialized, using nil repository")
+    }
+
 	neo4jRepo := infrastructurerepos.NewNeo4jConceptRepository(c.neo4jClient, c.logger)
-	mongoRepo := infrastructurerepos.NewMongoQueryRepository(c.mongoClient, c.logger)
+	
 	weaviateRepo := infrastructurerepos.NewWeaviateVectorRepository(c.weaviateClient, c.logger)
 
 	c.conceptRepo = neo4jRepo

@@ -22,6 +22,7 @@ type QueryRepository interface {
 	Save(ctx context.Context, query *entities.Query) error
 	FindByID(ctx context.Context, id string) (*entities.Query, error)
 	FindByUserID(ctx context.Context, userID string, limit int) ([]*entities.Query, error)
+	FindByConceptName(ctx context.Context, conceptName string) (*entities.Query, error)
 	GetAnalytics(ctx context.Context, filters AnalyticsFilter) (*QueryAnalytics, error)
 	GetPopularConcepts(ctx context.Context, limit int) ([]ConceptPopularity, error)
 	GetQueryTrends(ctx context.Context, days int) ([]QueryTrend, error)

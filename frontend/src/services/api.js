@@ -44,23 +44,13 @@ export const mathAPI = {
       }, {
         timeout: 120000
       });
+      console.log(response.data)
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to process query');
     }
     },
-    // Get detailed information about a concept
-  async getConceptDetail(conceptId) {
-    try {
-      const response = await api.post('/concept-detail', {
-        concept_id: conceptId
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to get concept details');
-    }
-    },
-  
+
   // Get all available concepts
   async getAllConcepts() {
     try {
@@ -119,42 +109,6 @@ export const mathAPI = {
     }
   },
 
-  // Enhanced query with automatic resource discovery
-  async queryWithResources(question) {
-    try {
-      const response = await api.post('/query-with-resources', { question });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to query with resources');
-    }
-  },
-
-  // Web scraping and resource methods
-  async scrapeResources(conceptNames = null, forceRefresh = false, maxResourcesPerConcept = 6) {
-    try {
-      const response = await api.post('/scrape-educational-resources', {
-        concept_names: conceptNames,
-        force_refresh: forceRefresh,
-        max_resources_per_concept: maxResourcesPerConcept
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to scrape resources');
-    }
-  },
-
-  async getResourcesForConcept(conceptId, filters = {}) {
-    try {
-      const params = new URLSearchParams({
-        ...filters,
-        limit: filters.limit || 20
-      });
-      const response = await api.get(`/resources/${conceptId}?${params}`);
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.detail || 'Failed to get resources for concept');
-    }
-  },
 
   async getResourceStatistics() {
     try {
@@ -172,6 +126,20 @@ export const mathAPI = {
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.detail || 'Failed to test scraping');
+    }
+  },
+
+  // Find learning resources for a specific concept
+  async findResourcesForConcept(concept) {
+    try {
+      const response = await api.post(`/resources/find/${encodeURIComponent(concept)}`, {}, {
+        headers: {
+          'X-Request-ID': `req-${Date.now()}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.detail || 'Failed to find resources for concept');
     }
   }
 };

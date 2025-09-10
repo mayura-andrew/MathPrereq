@@ -89,13 +89,22 @@ const LearningPath = ({ learningPath }) => {
       // Get detailed concept information using the correct API endpoint
       const conceptDetail = await mathAPI.processQuery(concept.name)
       
+      // Extract prerequisites from learning_path.concepts if available
+      let prerequisites = conceptDetail.prerequisites || []
+      
+      // If no direct prerequisites, try to extract from learning_path
+      if (!prerequisites.length && conceptDetail.learning_path?.concepts) {
+        // Get all concepts except the current one as prerequisites
+        prerequisites = conceptDetail.learning_path.concepts.filter(c => c.name !== concept.name)
+      }
+      
       // Update the specific tab with loaded data
       setLearningTabs(prev => prev.map(tab => 
         tab.id === tabId ? {
           ...tab,
           loading: false,
           explanation: conceptDetail.detailed_explanation || conceptDetail.explanation || conceptDetail.answer,
-          prerequisites: conceptDetail.prerequisites || [],
+          prerequisites: prerequisites,
           examples: conceptDetail.examples || [],
           resources: conceptDetail.resources || [],
           leads_to: conceptDetail.leads_to || []
@@ -104,7 +113,7 @@ const LearningPath = ({ learningPath }) => {
       
       // Debug logging to see what we received
       console.log('🔍 Concept detail received:', conceptDetail)
-      console.log('📚 Prerequisites found:', conceptDetail.prerequisites)
+      console.log('📚 Prerequisites extracted:', prerequisites)
     } catch (error) {
       console.error('Failed to load concept details:', error)
       setLearningTabs(prev => prev.map(tab => 
@@ -141,13 +150,13 @@ const LearningPath = ({ learningPath }) => {
     setSearchingResources(true)
     
     try {
-      // Make API request to search for learning resources
-      const searchResults = await mathAPI.searchLearningResources(concept)
+      // Make API request to search for learning resources using the new endpoint
+      const searchResults = await mathAPI.findResourcesForConcept(concept)
       
       // Store searched resources for this tab
       setSearchedResources(prev => ({
         ...prev,
-        [tabId]: searchResults.resources || []
+        [tabId]: searchResults.resources || searchResults.data || []
       }))
       
       console.log('🔍 Learning resources found:', searchResults)

@@ -239,6 +239,74 @@ func (s *queryService) GetResourcesForConcepts(ctx context.Context, conceptNames
 	return allResources, nil
 }
 
+// FindCachedConceptQuery searches for existing queries that match the concept
+func (s *queryService) FindCachedConceptQuery(ctx context.Context, conceptName string) (*entities.Query, error) {
+	// Search for queries where the concept appears in identified_concepts
+	// and the query was successful
+	return s.queryRepo.FindByConceptName(ctx, conceptName)
+}
+
+// SmartConceptQuery checks cache first, then processes if needed
+func (s *queryService) SmartConceptQuery(ctx context.Context, conceptName, userID, requestID string) (*services.QueryResult, error) {
+	startTime := time.Now()
+
+	s.logger.Info("Smart concept query started",
+		zap.String("concept", conceptName),
+		zap.String("user_id", userID),
+		zap.String("request_id", requestID))
+
+	// Step 1: Try to find cached query for this concept
+	cachedQuery, err := s.FindCachedConceptQuery(ctx, conceptName)
+	if err != nil {
+		s.logger.Warn("Failed to search cached queries", zap.Error(err))
+		// Continue to fresh processing if cache search fails
+	}
+
+	// Step 2: If we have cached data and it's relatively recent (within 7 days), return it
+	if cachedQuery != nil && cachedQuery.Timestamp.After(time.Now().Add(-7*24*time.Hour)) {
+		s.logger.Info("Returning cached concept query",
+			zap.String("concept", conceptName),
+			zap.String("cached_query_id", cachedQuery.ID),
+			zap.Time("cached_at", cachedQuery.Timestamp))
+
+		// Get existing resources for the concept in background
+		go func() {
+			if s.resourceScraper != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				conceptID := s.generateConceptID(conceptName)
+				_, _ = s.resourceScraper.GetResourcesForConcept(ctx, conceptID, 5)
+			}
+		}()
+
+		// Convert cached query to QueryResult
+		result := &services.QueryResult{
+			Query:              cachedQuery,
+			IdentifiedConcepts: cachedQuery.IdentifiedConcepts,
+			PrerequisitePath:   cachedQuery.PrerequisitePath,
+			RetrievedContext:   cachedQuery.Response.RetrievedContext,
+			Explanation:        cachedQuery.Response.Explanation,
+			ProcessingTime:     time.Since(startTime),
+		}
+
+		return result, nil
+	}
+
+	// Step 3: No suitable cached data found, process fresh query
+	s.logger.Info("No suitable cached data found, processing fresh query",
+		zap.String("concept", conceptName))
+
+	// Create a query request for the concept name
+	queryReq := &services.QueryRequest{
+		UserID:    userID,
+		Question:  fmt.Sprintf("Explain %s in detail with prerequisites and examples", conceptName),
+		RequestID: requestID,
+	}
+
+	// Process the query normally
+	return s.ProcessQuery(ctx, queryReq)
+}
+
 // generateConceptID creates a standardized concept ID (same logic as scraper)
 func (s *queryService) generateConceptID(conceptName string) string {
 	// Use same logic as scraper to ensure consistency

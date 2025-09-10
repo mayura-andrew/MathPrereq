@@ -84,6 +84,10 @@ func SetupRoutes(
 				handler.FindResourcesForConcepts)
 		}
 
+		// Smart concept query - checks MongoDB first, then processes if needed
+		v1.POST("/concept-query",
+			middleware.Timeout(3*time.Minute),
+			handler.SmartConceptQuery)
 	}
 
 	// Debug routes (only in development)

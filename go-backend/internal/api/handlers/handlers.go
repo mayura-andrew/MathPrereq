@@ -3,12 +3,14 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/mathprereq/internal/api/models"
 	"github.com/mathprereq/internal/container"
+	"github.com/mathprereq/internal/data/scraper"
 	"github.com/mathprereq/internal/domain/services"
 	"go.uber.org/zap"
 )
@@ -273,4 +275,138 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 		"timestamp": time.Now().UTC(),
 		"uptime":    time.Since(h.startTime).String(),
 	})
+}
+
+// SmartConceptQuery handles concept queries with MongoDB cache checking
+func (h *Handler) SmartConceptQuery(c *gin.Context) {
+	requestID := getRequestID(c)
+	startTime := time.Now()
+
+	h.logger.Info("Smart concept query started", zap.String("request_id", requestID))
+
+	var req models.ConceptQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("Invalid concept query request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success":    false,
+			"message":    "Invalid request format",
+			"error":      err.Error(),
+			"request_id": requestID,
+		})
+		return
+	}
+
+	// Validate concept name
+	conceptName := strings.TrimSpace(req.ConceptName)
+	if conceptName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success":    false,
+			"message":    "Concept name is required",
+			"request_id": requestID,
+		})
+		return
+	}
+
+	userID := req.UserID
+	if userID == "" {
+		userID = "anonymous_" + requestID[:8]
+	}
+
+	h.logger.Info("Processing smart concept query",
+		zap.String("concept", conceptName),
+		zap.String("user_id", userID),
+		zap.String("request_id", requestID))
+
+	// Call the service method
+	result, err := h.container.QueryService().SmartConceptQuery(
+		c.Request.Context(),
+		conceptName,
+		userID,
+		requestID,
+	)
+
+	if err != nil {
+		h.logger.Error("Smart concept query failed",
+			zap.String("concept", conceptName),
+			zap.Error(err))
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success":         false,
+			"message":         "Failed to process concept query",
+			"concept_name":    conceptName,
+			"error":           err.Error(),
+			"request_id":      requestID,
+			"processing_time": time.Since(startTime).String(),
+		})
+		return
+	}
+
+	// Determine source (cache vs fresh processing)
+	source := "processed"
+	var cacheAge *time.Duration
+
+	// If query was completed very quickly (< 1 second), it was likely from cache
+	if result.ProcessingTime < time.Second {
+		source = "cache"
+		if result.Query != nil {
+			age := time.Since(result.Query.Timestamp)
+			cacheAge = &age
+		}
+	}
+
+	// Convert prerequisite path
+	var learningPath models.LearningPath
+	for _, concept := range result.PrerequisitePath {
+		learningPath.Concepts = append(learningPath.Concepts, models.ConceptInfo{
+			ID:          concept.ID,
+			Name:        concept.Name,
+			Description: concept.Description,
+			Type:        concept.Type,
+		})
+	}
+	learningPath.TotalConcepts = len(learningPath.Concepts)
+
+	// Get educational resources if available
+	var educationalResources []scraper.EducationalResource
+	resourcesMessage := ""
+
+	if len(result.IdentifiedConcepts) > 0 {
+		// Try to get existing resources
+		resources, err := h.container.QueryService().GetResourcesForConcepts(
+			c.Request.Context(),
+			result.IdentifiedConcepts,
+			10,
+		)
+		if err == nil && len(resources) > 0 {
+			educationalResources = resources
+			resourcesMessage = fmt.Sprintf("Found %d educational resources", len(resources))
+		} else {
+			resourcesMessage = "Educational resources are being gathered in the background"
+		}
+	}
+
+	// Build response
+	response := models.ConceptQueryResponse{
+		Success:              true,
+		ConceptName:          conceptName,
+		Source:               source,
+		IdentifiedConcepts:   result.IdentifiedConcepts,
+		LearningPath:         learningPath,
+		Explanation:          result.Explanation,
+		RetrievedContext:     result.RetrievedContext,
+		ProcessingTime:       time.Since(startTime),
+		CacheAge:             cacheAge,
+		RequestID:            requestID,
+		Timestamp:            time.Now(),
+		EducationalResources: educationalResources,
+		ResourcesMessage:     resourcesMessage,
+	}
+
+	h.logger.Info("Smart concept query completed successfully",
+		zap.String("concept", conceptName),
+		zap.String("source", source),
+		zap.Duration("processing_time", response.ProcessingTime),
+		zap.String("request_id", requestID))
+
+	c.JSON(http.StatusOK, response)
 }

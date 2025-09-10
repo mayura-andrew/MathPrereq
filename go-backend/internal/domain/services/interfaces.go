@@ -21,6 +21,9 @@ type QueryService interface {
 
 	// Resource-related methods for learning materials
 	GetResourcesForConcepts(ctx context.Context, conceptNames []string, limit int) ([]scraper.EducationalResource, error)
+
+	// Smart concept query - checks cache first, then processes if needed
+	SmartConceptQuery(ctx context.Context, conceptName, userID, requestID string) (*QueryResult, error)
 }
 
 type ResourceService interface {
