@@ -1,4 +1,4 @@
-.PHONY: help build run test clean dev-up dev-down migrate migrate-clean services-up services-down
+.PHONY: help build run test clean dev-up dev-down migrate migrate-clean services-up services-down all build-cpp docker-up docker-down logs
 
 DOCKER_COMPOSE_DEV = docker-compose -f docker-compose.yml -f docker-compose.dev.yml
 DOCKER_COMPOSE = docker-compose
@@ -317,3 +317,93 @@ explore-query-data:
 	@echo "🔍 Exploring Query Analytics Data..."
 	@chmod +x scripts/explore-query-data.sh
 	@./scripts/explore-query-data.sh
+
+# Default target
+all: deps docker-up build-cpp build-go
+
+# Install Go dependencies
+deps:
+	@echo "Installing Go dependencies..."
+	go mod tidy
+	go mod download
+
+# Start all services with Docker
+docker-up:
+	@echo "Starting MongoDB and Neo4j services..."
+	docker-compose up -d
+	@echo "Waiting for services to be ready..."
+	sleep 10
+	@echo "Services are ready!"
+
+# Stop all services
+docker-down:
+	@echo "Stopping all services..."
+	docker-compose down
+
+# View service logs
+logs:
+	docker-compose logs -f
+
+# Build C++ components (if any)
+build-cpp:
+	@echo "Building C++ components..."
+	# cd cpp && make (uncomment when you have C++ components)
+	@echo "C++ components ready"
+
+# Build Go application
+build-go: deps
+	@echo "Building Go application..."
+	go build -o bin/mathprereq-server cmd/server/main.go
+	@echo "Go build completed"
+
+# Development mode with hot reload
+dev: docker-up
+	@echo "Starting development server with hot reload..."
+	@echo "Loading environment variables..."
+	set -a && source .env && set +a
+	LOG_LEVEL=debug LOG_FORMAT=console go run cmd/server/main.go
+
+# Production build
+prod: all
+	@echo "Starting production server..."
+	set -a && source .env && set +a
+	./bin/mathprereq-server
+
+# Run tests
+test: docker-up
+	@echo "Running Go tests..."
+	go test ./... -v
+	# cd cpp && make test (uncomment for C++ tests)
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	rm -rf bin/
+	docker-compose down -v
+	# cd cpp && make clean (uncomment for C++ cleanup)
+	@echo "Clean completed"
+
+# Database setup and migration
+db-setup: docker-up
+	@echo "Setting up database schema..."
+	@echo "MongoDB collections will be created automatically"
+	@echo "Neo4j schema can be loaded from data/ directory"
+
+# Quick health check
+health:
+	@echo "Checking service health..."
+	curl -s http://localhost:8080/health || echo "Server not running"
+	@echo ""
+	docker-compose ps
+
+# Open resources demo
+demo:
+	@echo "Opening resources demo..."
+	@echo "Demo available at: http://localhost:8000/resources-demo.html"
+	cd web && python3 -m http.server 8000
+
+# Development setup (first time)
+setup: deps docker-up db-setup build-go
+	@echo "Development environment setup complete!"
+	@echo "Run 'make dev' to start the development server"
+	@echo "Run 'make demo' to open the resources demo page"

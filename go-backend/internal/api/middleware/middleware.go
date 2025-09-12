@@ -1,64 +1,177 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/mathprereq/pkg/logger"
 	"go.uber.org/zap"
 )
 
+// RequestID middleware adds unique request ID to each request
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		requestID := uuid.New().String()
-		c.Header("X-Request-ID", requestID)
+		requestID := c.GetHeader("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+
 		c.Set("request_id", requestID)
+		c.Header("X-Request-ID", requestID)
+
+		// Add request ID to context for downstream services
+		ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
+		c.Request = c.Request.WithContext(ctx)
+
 		c.Next()
 	}
 }
 
-func Logger() gin.HandlerFunc {
-	logger := logger.MustGetLogger()
+// RequestLogger provides structured logging for all HTTP requests
+func RequestLogger(logger *zap.Logger) gin.HandlerFunc {
+	return gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		requestID, _ := param.Keys["request_id"].(string)
 
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		raw := c.Request.URL.RawQuery
-
-		c.Next()
-
-		latency := time.Since(start)
-		clientIP := c.ClientIP()
-		method := c.Request.Method
-		statusCode := c.Writer.Status()
-		bodySize := c.Writer.Size()
-
-		if raw != "" {
-			path = path + "?" + raw
+		// Create structured log entry
+		fields := []zap.Field{
+			zap.String("request_id", requestID),
+			zap.String("method", param.Method),
+			zap.String("path", param.Path),
+			zap.Int("status", param.StatusCode),
+			zap.Duration("latency", param.Latency),
+			zap.String("client_ip", param.ClientIP),
+			zap.String("user_agent", param.Request.UserAgent()),
+			zap.Int("body_size", param.BodySize),
 		}
 
-		// Safe request ID extraction
-		var requestIDStr string
-		if requestID, exists := c.Get("request_id"); exists && requestID != nil {
-			if idStr, ok := requestID.(string); ok {
-				requestIDStr = idStr
-			} else {
-				requestIDStr = fmt.Sprintf("%v", requestID)
+		// Add error information if present
+		if param.ErrorMessage != "" {
+			fields = append(fields, zap.String("error", param.ErrorMessage))
+		}
+
+		// Log with appropriate level based on status code
+		if param.StatusCode >= 500 {
+			logger.Error("HTTP Request", fields...)
+		} else if param.StatusCode >= 400 {
+			logger.Warn("HTTP Request", fields...)
+		} else {
+			logger.Info("HTTP Request", fields...)
+		}
+
+		return ""
+	})
+}
+
+// Timeout middleware adds timeout to request context
+func Timeout(duration time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), duration)
+		defer cancel()
+
+		c.Request = c.Request.WithContext(ctx)
+
+		// Channel to capture if handler completed
+		finished := make(chan struct{})
+
+		go func() {
+			defer close(finished)
+			c.Next()
+		}()
+
+		select {
+		case <-finished:
+			// Handler completed successfully
+			return
+		case <-ctx.Done():
+			// Timeout occurred
+			if ctx.Err() == context.DeadlineExceeded {
+				c.AbortWithStatusJSON(http.StatusRequestTimeout, gin.H{
+					"success":    false,
+					"error":      "Request timeout",
+					"request_id": c.GetString("request_id"),
+					"timeout":    duration.String(),
+				})
+			}
+			return
+		}
+	}
+}
+
+// Recovery middleware with enhanced error reporting
+func Recovery(logger *zap.Logger) gin.HandlerFunc {
+	return gin.RecoveryWithWriter(nil, func(c *gin.Context, err interface{}) {
+		requestID := c.GetString("request_id")
+		stack := string(debug.Stack())
+
+		logger.Error("Panic recovered",
+			zap.String("request_id", requestID),
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.Any("error", err),
+			zap.String("stack", stack))
+
+		// Return structured error response
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"success":    false,
+			"error":      "Internal server error",
+			"request_id": requestID,
+		})
+	})
+}
+
+// CORS middleware for cross-origin requests
+func CORS() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		origin := c.Request.Header.Get("Origin")
+
+		// Allow specific origins or all origins in development
+		allowedOrigins := []string{
+			"http://localhost:3000",
+			"http://localhost:3001",
+			"https://mathprereq.com",
+			"https://app.mathprereq.com",
+		}
+
+		allowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				allowed = true
+				break
 			}
 		}
 
-		logger.Info("HTTP Request",
-			zap.String("request_id", requestIDStr),
-			zap.String("method", method),
-			zap.String("path", path),
-			zap.Int("status", statusCode),
-			zap.String("client_ip", clientIP),
-			zap.Duration("latency", latency),
-			zap.Int("body_size", bodySize),
-		)
+		if allowed || gin.Mode() == gin.DebugMode {
+			c.Header("Access-Control-Allow-Origin", origin)
+		}
+
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Request-ID")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Max-Age", "86400")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// Security headers middleware
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+
+		c.Next()
 	}
 }
 

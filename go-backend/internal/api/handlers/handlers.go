@@ -1,54 +1,73 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/mathprereq/internal/api/models"
-	"github.com/mathprereq/internal/core/orchestrator"
-	"github.com/mathprereq/internal/data/mongodb"
+	"github.com/mathprereq/internal/container"
 	"github.com/mathprereq/internal/data/scraper"
+	"github.com/mathprereq/internal/domain/services"
 	"go.uber.org/zap"
 )
 
-type Handlers struct {
-	orchestrator *orchestrator.Orchestrator
-	mongoClient  *mongodb.Client
-	webScraper   *scraper.EducationalWebScraper
-	logger       *zap.Logger
-	startTime    time.Time
+type Handler struct {
+	container container.Container
+	validator *validator.Validate
+	logger    *zap.Logger
+	startTime time.Time
 }
 
-func New(orch *orchestrator.Orchestrator, mongoClient *mongodb.Client, webScraper *scraper.EducationalWebScraper, logger *zap.Logger) *Handlers {
-	return &Handlers{
-		orchestrator: orch,
-		mongoClient:  mongoClient,
-		webScraper:   webScraper,
-		logger:       logger,
-		startTime:    time.Now(),
+func NewHandler(container container.Container, logger *zap.Logger) *Handler {
+	validator := validator.New()
+
+	return &Handler{
+		container: container,
+		validator: validator,
+		logger:    logger,
+		startTime: time.Now(),
 	}
 }
 
-func (h *Handlers) ProcessQuery(c *gin.Context) {
+func (h *Handler) ProcessQuery(c *gin.Context) {
+	requestID := getRequestID(c)
 	start := time.Now()
 
 	var req models.QueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Warn("Invalid request", zap.Error(err))
+		h.logger.Warn("Invalid request", zap.Error(err), zap.String("request_id", requestID))
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   err.Error(),
-			"success": false,
+			"error":      err.Error(),
+			"success":    false,
+			"request_id": requestID,
 		})
 		return
 	}
 
-	h.logger.Info("Processing query", zap.String("query", req.Question[:min(len(req.Question), 100)]))
+	if err := h.validator.Struct(&req); err != nil {
+		h.logger.Warn("Validation failed", zap.Error(err), zap.String("request_id", requestID))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":      "Validation failed: " + err.Error(),
+			"success":    false,
+			"request_id": requestID,
+		})
+		return
+	}
 
-	result, err := h.orchestrator.ProcessQuery(c.Request.Context(), req.Question)
+	h.logger.Info("Processing query",
+		zap.String("query", req.Question[:min(len(req.Question), 100)]),
+		zap.String("request_id", requestID))
+
+	// Use container's QueryService instead of undefined orchestrator
+	result, err := h.container.QueryService().ProcessQuery(c.Request.Context(), &services.QueryRequest{
+		UserID:    req.UserID,
+		Question:  req.Question,
+		RequestID: requestID,
+	})
 	processingTime := time.Since(start)
 
 	if err != nil {
@@ -116,16 +135,25 @@ func (h *Handlers) ProcessQuery(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func (h *Handlers) GetConceptDetail(c *gin.Context) {
-	var req models.ConceptDetailRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+func (h *Handler) GetConceptDetail(c *gin.Context) {
+	requestID := getRequestID(c)
+
+	// Get concept ID from URL parameter instead of JSON body
+	conceptID := c.Param("id")
+	if conceptID == "" {
+		h.logger.Warn("Missing concept ID parameter", zap.String("request_id", requestID))
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Success:   false,
+			Error:     "Concept ID parameter is required",
+			RequestID: requestID,
+			Timestamp: time.Now(),
+		})
 		return
 	}
 
-	h.logger.Info("Getting concept detail", zap.String("concept_id", req.ConceptID))
+	h.logger.Info("Getting concept detail", zap.String("concept_id", conceptID), zap.String("request_id", requestID))
 
-	result, err := h.orchestrator.GetConceptDetail(c.Request.Context(), req.ConceptID)
+	result, err := h.container.QueryService().GetConceptDetail(c.Request.Context(), conceptID)
 	if err != nil {
 		h.logger.Error("Failed to get concept detail", zap.Error(err))
 		errorMsg := err.Error()
@@ -134,6 +162,7 @@ func (h *Handlers) GetConceptDetail(c *gin.Context) {
 			Prerequisites:       []models.ConceptInfo{},
 			LeadsTo:             []models.ConceptInfo{},
 			DetailedExplanation: "",
+			RequestID:           requestID,
 			ErrorMessage:        &errorMsg,
 		}
 		c.JSON(http.StatusOK, response)
@@ -178,8 +207,8 @@ func (h *Handlers) GetConceptDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func (h *Handlers) ListConcepts(c *gin.Context) {
-	concepts, err := h.orchestrator.GetAllConcepts(c.Request.Context())
+func (h *Handler) ListConcepts(c *gin.Context) {
+	concepts, err := h.container.QueryService().GetAllConcepts(c.Request.Context())
 	if err != nil {
 		h.logger.Error("Failed to list concepts", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -208,172 +237,176 @@ func (h *Handlers) ListConcepts(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// In your handlers.go, around line 190
-func (h *Handlers) HealthCheck(c *gin.Context) {
+// HealthCheck provides comprehensive health check
+func (h *Handler) HealthCheck(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get system stats
-	stats, err := h.orchestrator.GetSystemStats(ctx)
-	if err != nil {
-		h.logger.Error("Failed to get system stats", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": "error",
-			"error":  "Failed to retrieve system statistics",
-		})
-		return
+	// Get health check from container
+	healthStatus := h.container.HealthCheck(ctx)
+
+	systemHealth := "healthy"
+	for service, healthy := range healthStatus {
+		if !healthy {
+			systemHealth = "degraded"
+			h.logger.Warn("Service unhealthy", zap.String("service", service))
+		}
 	}
 
 	// Check if this is a detailed health check
 	if c.Request.URL.Path == "/api/v1/health-detailed" {
 		c.JSON(http.StatusOK, gin.H{
-			"status":          "healthy",
-			"timestamp":       time.Now().UTC(),
-			"version":         "1.0.0",
-			"total_concepts":  stats.TotalConcepts, // Keep as int64
-			"total_chunks":    stats.TotalChunks,   // Keep as int64
-			"total_edges":     stats.TotalEdges,    // Keep as int64
-			"knowledge_graph": stats.KnowledgeGraph,
-			"vector_store":    stats.VectorStore,
-			"llm_provider":    stats.LLMProvider,
-			"system_health":   stats.SystemHealth,
+			"status":    systemHealth,
+			"timestamp": time.Now().UTC(),
+			"uptime":    time.Since(h.startTime).String(),
+			"version":   "1.0.0",
+			"services":  healthStatus,
 		})
 		return
 	}
 
 	// Simple health check
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "healthy",
+	statusCode := http.StatusOK
+	if systemHealth == "degraded" {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	c.JSON(statusCode, gin.H{
+		"status":    systemHealth,
 		"timestamp": time.Now().UTC(),
+		"uptime":    time.Since(h.startTime).String(),
 	})
 }
 
-// ScrapeAndGetLearningResources - Simple endpoint to scrape and return learning resources
-func (h *Handlers) ScrapeAndGetLearningResources(c *gin.Context) {
-	start := time.Now()
+// SmartConceptQuery handles concept queries with MongoDB cache checking
+func (h *Handler) SmartConceptQuery(c *gin.Context) {
+	requestID := getRequestID(c)
+	startTime := time.Now()
 
-	var req struct {
-		ConceptName string `json:"concept_name" binding:"required"`
-		Limit       int    `json:"limit,omitempty"`
-	}
+	h.logger.Info("Smart concept query started", zap.String("request_id", requestID))
 
+	var req models.ConceptQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Warn("Invalid learning resources request", zap.Error(err))
+		h.logger.Warn("Invalid concept query request", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
+			"success":    false,
+			"message":    "Invalid request format",
+			"error":      err.Error(),
+			"request_id": requestID,
 		})
 		return
 	}
 
-	if req.Limit == 0 {
-		req.Limit = 5 // Default limit
-	}
-
-	h.logger.Info("Scraping learning resources",
-		zap.String("concept_name", req.ConceptName),
-		zap.Int("limit", req.Limit))
-
-	// Check if scraper is available
-	if h.webScraper == nil {
-		h.logger.Error("Web scraper not available")
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"success": false,
-			"error":   "Web scraper service is not available",
+	// Validate concept name
+	conceptName := strings.TrimSpace(req.ConceptName)
+	if conceptName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success":    false,
+			"message":    "Concept name is required",
+			"request_id": requestID,
 		})
 		return
 	}
 
-	// First try to get existing resources
-	conceptID := generateConceptID(req.ConceptName)
-	existingResources, err := h.webScraper.GetResourcesForConcept(c.Request.Context(), conceptID, req.Limit)
-
-	if err != nil || len(existingResources) == 0 {
-		// No existing resources, trigger scraping
-		h.logger.Info("No existing resources found, triggering scraping",
-			zap.String("concept", req.ConceptName))
-
-		err = h.webScraper.ScrapeResourcesForConcepts(c.Request.Context(), []string{req.ConceptName})
-		if err != nil {
-			h.logger.Error("Failed to scrape resources", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"error":   "Failed to scrape resources: " + err.Error(),
-			})
-			return
-		}
-
-		// Get resources after scraping
-		existingResources, err = h.webScraper.GetResourcesForConcept(c.Request.Context(), conceptID, req.Limit)
-		if err != nil {
-			h.logger.Error("Failed to retrieve scraped resources", zap.Error(err))
-		}
+	userID := req.UserID
+	if userID == "" {
+		userID = "anonymous_" + requestID[:8]
 	}
 
-	processingTime := time.Since(start)
+	h.logger.Info("Processing smart concept query",
+		zap.String("concept", conceptName),
+		zap.String("user_id", userID),
+		zap.String("request_id", requestID))
 
-	h.logger.Info("Learning resources request completed",
-		zap.String("concept_name", req.ConceptName),
-		zap.Int("resources_found", len(existingResources)),
-		zap.Duration("processing_time", processingTime))
+	// Call the service method
+	result, err := h.container.QueryService().SmartConceptQuery(
+		c.Request.Context(),
+		conceptName,
+		userID,
+		requestID,
+	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":         true,
-		"concept_name":    req.ConceptName,
-		"concept_id":      conceptID,
-		"total_resources": len(existingResources),
-		"resources":       existingResources,
-		"processing_time": processingTime.String(),
-	})
-}
-
-// GetQueryAnalytics returns query analytics data
-func (h *Handlers) GetQueryAnalytics(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	// Get query statistics
-	stats, err := h.orchestrator.GetQueryStats(ctx)
 	if err != nil {
-		h.logger.Error("Failed to get query stats", zap.Error(err))
+		h.logger.Error("Smart concept query failed",
+			zap.String("concept", conceptName),
+			zap.Error(err))
+
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to retrieve query analytics",
+			"success":         false,
+			"message":         "Failed to process concept query",
+			"concept_name":    conceptName,
+			"error":           err.Error(),
+			"request_id":      requestID,
+			"processing_time": time.Since(startTime).String(),
 		})
 		return
 	}
 
-	// Get popular concepts
-	popularConcepts, err := h.orchestrator.GetPopularConcepts(ctx, 10)
-	if err != nil {
-		h.logger.Warn("Failed to get popular concepts", zap.Error(err))
-		popularConcepts = []map[string]interface{}{}
-	}
+	// Determine source (cache vs fresh processing)
+	source := "processed"
+	var cacheAge *time.Duration
 
-	// Get query trends for the last 7 days
-	queryTrends, err := h.orchestrator.GetQueryTrends(ctx, 7)
-	if err != nil {
-		h.logger.Warn("Failed to get query trends", zap.Error(err))
-		queryTrends = []map[string]interface{}{}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"stats":            stats,
-		"popular_concepts": popularConcepts,
-		"query_trends":     queryTrends,
-	})
-}
-
-// Helper function to generate concept ID
-func generateConceptID(conceptName string) string {
-	// Simple concept ID generation
-	id := strings.ToLower(conceptName)
-	id = strings.ReplaceAll(id, " ", "_")
-	id = strings.ReplaceAll(id, "-", "_")
-	// Remove any non-alphanumeric characters except underscore
-	var result strings.Builder
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			result.WriteRune(r)
+	// If query was completed very quickly (< 1 second), it was likely from cache
+	if result.ProcessingTime < time.Second {
+		source = "cache"
+		if result.Query != nil {
+			age := time.Since(result.Query.Timestamp)
+			cacheAge = &age
 		}
 	}
-	return result.String()
+
+	// Convert prerequisite path
+	var learningPath models.LearningPath
+	for _, concept := range result.PrerequisitePath {
+		learningPath.Concepts = append(learningPath.Concepts, models.ConceptInfo{
+			ID:          concept.ID,
+			Name:        concept.Name,
+			Description: concept.Description,
+			Type:        concept.Type,
+		})
+	}
+	learningPath.TotalConcepts = len(learningPath.Concepts)
+
+	// Get educational resources if available
+	var educationalResources []scraper.EducationalResource
+	resourcesMessage := ""
+
+	if len(result.IdentifiedConcepts) > 0 {
+		// Try to get existing resources
+		resources, err := h.container.QueryService().GetResourcesForConcepts(
+			c.Request.Context(),
+			result.IdentifiedConcepts,
+			10,
+		)
+		if err == nil && len(resources) > 0 {
+			educationalResources = resources
+			resourcesMessage = fmt.Sprintf("Found %d educational resources", len(resources))
+		} else {
+			resourcesMessage = "Educational resources are being gathered in the background"
+		}
+	}
+
+	// Build response
+	response := models.ConceptQueryResponse{
+		Success:              true,
+		ConceptName:          conceptName,
+		Source:               source,
+		IdentifiedConcepts:   result.IdentifiedConcepts,
+		LearningPath:         learningPath,
+		Explanation:          result.Explanation,
+		RetrievedContext:     result.RetrievedContext,
+		ProcessingTime:       time.Since(startTime),
+		CacheAge:             cacheAge,
+		RequestID:            requestID,
+		Timestamp:            time.Now(),
+		EducationalResources: educationalResources,
+		ResourcesMessage:     resourcesMessage,
+	}
+
+	h.logger.Info("Smart concept query completed successfully",
+		zap.String("concept", conceptName),
+		zap.String("source", source),
+		zap.Duration("processing_time", response.ProcessingTime),
+		zap.String("request_id", requestID))
+
+	c.JSON(http.StatusOK, response)
 }

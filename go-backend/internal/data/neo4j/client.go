@@ -79,7 +79,7 @@ func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string
 
 		if record.Next(ctx) {
 			id, _ := record.Record().Get("id")
-			idStr := id.(string)
+			idStr := toString(id)
 			return &idStr, nil
 		}
 
@@ -97,44 +97,48 @@ func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string
 	return result.(*string), nil
 }
 
-// func (c *Client) FindConceptID(ctx context.Context, conceptName string) (*string, error) {
-// 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-// 	defer session.Close(ctx)
+func (c *Client) GetAllConcepts(ctx context.Context) ([]Concept, error) {
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
 
-// 	query := `
-// 		MATCH (c:Concept)
-// 		WHERE toLower(c.name) CONTAINS toLower($conceptName)
-// 		   OR toLower(c.id) = toLower($conceptName)
-// 		RETURN c.id as id
-// 		LIMIT 1
-// 	`
-// 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-// 		record, err := tx.Run(ctx, query, map[string]interface{}{
-// 			"conceptName": conceptName,
-// 		})
-// 		if err != nil {
-// 			return nil, err
-// 		}
+	query := `
+		MATCH (c:Concept)
+		RETURN c.id as id, c.name as name, c.description as description
+		ORDER BY c.name
+	`
 
-// 		if record.Next(ctx) {
-// 			id, _ := record.Record().Get("id")
-// 			idStr := id.(string)
-// 			return &idStr, nil
-// 		}
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		records, err := tx.Run(ctx, query, nil)
+		if err != nil {
+			return nil, err
+		}
 
-// 		return nil, nil
-// 	})
+		var concepts []Concept
+		for records.Next(ctx) {
+			record := records.Record()
 
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to find concept ID: %w", err)
-// 	}
+			id, _ := record.Get("id")
+			name, _ := record.Get("name")
+			description, _ := record.Get("description")
 
-// 	if result == nil {
-// 		return nil, nil
-// 	}
+			concept := Concept{
+				ID:          toString(id),
+				Name:        toString(name),
+				Description: toString(description),
+				Type:        "concept",
+			}
+			concepts = append(concepts, concept)
+		}
 
-// 	return result.(*string), nil
-// }
+		return concepts, nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all concepts: %w", err)
+	}
+
+	return result.([]Concept), nil
+}
 
 func (c *Client) FindPrerequisitePath(ctx context.Context, targetConcepts []string) ([]Concept, error) {
 	if len(targetConcepts) == 0 {
@@ -193,10 +197,10 @@ func (c *Client) FindPrerequisitePath(ctx context.Context, targetConcepts []stri
 			conceptType, _ := record.Get("type")
 
 			concept := Concept{
-				ID:          id.(string),
-				Name:        name.(string),
-				Description: description.(string),
-				Type:        conceptType.(string),
+				ID:          toString(id),
+				Name:        toString(name),
+				Description: toString(description),
+				Type:        toString(conceptType),
 			}
 			concepts = append(concepts, concept)
 		}
@@ -236,7 +240,6 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 		}
 
 		if !record.Next(ctx) {
-			// Log what we were looking for and suggest alternatives
 			c.logger.Warn("Concept not found",
 				zap.String("search_term", conceptID),
 				zap.String("suggestion", "Try searching by concept ID (e.g., 'func_basics') or exact name"))
@@ -252,9 +255,9 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 		leadsToRaw, _ := rec.Get("leads_to")
 
 		concept := Concept{
-			ID:          id.(string),
-			Name:        name.(string),
-			Description: description.(string),
+			ID:          toString(id),
+			Name:        toString(name),
+			Description: toString(description),
 			Type:        "target",
 		}
 
@@ -264,9 +267,9 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 				if prereqMap, ok := prereqRaw.(map[string]interface{}); ok {
 					if prereqMap["id"] != nil {
 						prerequisites = append(prerequisites, Concept{
-							ID:          prereqMap["id"].(string),
-							Name:        prereqMap["name"].(string),
-							Description: prereqMap["description"].(string),
+							ID:          toString(prereqMap["id"]),
+							Name:        toString(prereqMap["name"]),
+							Description: toString(prereqMap["description"]),
 							Type:        "prerequisite",
 						})
 					}
@@ -280,9 +283,9 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 				if nextMap, ok := nextRaw.(map[string]interface{}); ok {
 					if nextMap["id"] != nil {
 						leadsTo = append(leadsTo, Concept{
-							ID:          nextMap["id"].(string),
-							Name:        nextMap["name"].(string),
-							Description: nextMap["description"].(string),
+							ID:          toString(nextMap["id"]),
+							Name:        toString(nextMap["name"]),
+							Description: toString(nextMap["description"]),
 							Type:        "next_concept",
 						})
 					}
@@ -302,64 +305,6 @@ func (c *Client) GetConceptInfo(ctx context.Context, conceptID string) (*Concept
 	}
 
 	return result.(*ConceptDetailResult), nil
-}
-
-func (c *Client) GetAllConcepts(ctx context.Context) ([]Concept, error) {
-	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
-
-	query := `
-		MATCH (c:Concept)
-		RETURN c.id as id, c.name as name, c.description as description
-		ORDER BY c.name
-	`
-
-	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		records, err := tx.Run(ctx, query, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		var concepts []Concept
-		for records.Next(ctx) {
-			record := records.Record()
-
-			id, _ := record.Get("id")
-			name, _ := record.Get("name")
-			description, _ := record.Get("description")
-
-			concept := Concept{
-				ID:          id.(string),
-				Name:        name.(string),
-				Description: description.(string),
-				Type:        "concept",
-			}
-			concepts = append(concepts, concept)
-		}
-
-		return concepts, nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get all concepts: %w", err)
-	}
-
-	return result.([]Concept), nil
-}
-
-func (c *Client) IsHealthy(ctx context.Context) bool {
-	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
-
-	_, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		result, err := tx.Run(ctx, "RETURN 1", nil)
-		if err != nil {
-			return nil, err
-		}
-		return result.Next(ctx), nil
-	})
-
-	return err == nil
 }
 
 func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
@@ -385,14 +330,18 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 			relationshipCount, _ := rec.Get("relationshipCount")
 
 			return map[string]interface{}{
-				"total_concepts":      conceptCount,
-				"total_relationships": relationshipCount,
+				"total_concepts": conceptCount,
+				"total_chunks":   int64(0), // Placeholder for consistency
+				"total_edges":    relationshipCount,
+				"status":         "healthy",
 			}, nil
 		}
 
 		return map[string]interface{}{
-			"total_concepts":      0,
-			"total_relationships": 0,
+			"total_concepts": int64(0),
+			"total_chunks":   int64(0),
+			"total_edges":    int64(0),
+			"status":         "healthy",
 		}, nil
 	})
 
@@ -403,6 +352,31 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 	return result.(map[string]interface{}), nil
 }
 
+func (c *Client) IsHealthy(ctx context.Context) bool {
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		result, err := tx.Run(ctx, "RETURN 1", nil)
+		if err != nil {
+			return nil, err
+		}
+		return result.Next(ctx), nil
+	})
+
+	return err == nil
+}
+
 func (c *Client) Close() error {
 	return c.driver.Close(context.Background())
+}
+
+func toString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	if str, ok := value.(string); ok {
+		return str
+	}
+	return fmt.Sprintf("%v", value)
 }

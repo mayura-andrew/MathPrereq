@@ -3,6 +3,7 @@ package mongodb
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mathprereq/internal/data/neo4j"
@@ -41,11 +42,34 @@ type QueryAnalytics struct {
 	logger     *zap.Logger
 }
 
-// NewQueryAnalytics creates a new query analytics instance
+// NewQueryAnalytics creates a new query analytics instance using shared MongoDB client
 func NewQueryAnalytics(mongoClient *mongo.Client, databaseName string) *QueryAnalytics {
 	collection := mongoClient.Database(databaseName).Collection("query_responses")
 
-	// Create indexes for efficient queries
+	logger := logger.MustGetLogger()
+
+	// Create indexes for efficient queries (with error handling like scraper)
+	if err := createQueryAnalyticsIndexes(context.Background(), collection, logger); err != nil {
+		// This error is expected if the user doesn't have admin rights, so we just log it.
+		if strings.Contains(err.Error(), "requires authentication") || strings.Contains(err.Error(), "not authorized") {
+			logger.Debug("Skipping index creation due to permissions", zap.Error(err))
+		} else {
+			logger.Warn("Failed to create query analytics indexes", zap.Error(err))
+		}
+	}
+
+	logger.Info("Query analytics initialized successfully",
+		zap.String("database", databaseName),
+		zap.String("collection", "query_responses"))
+
+	return &QueryAnalytics{
+		collection: collection,
+		logger:     logger,
+	}
+}
+
+// createQueryAnalyticsIndexes creates MongoDB indexes for efficient queries
+func createQueryAnalyticsIndexes(ctx context.Context, collection *mongo.Collection, logger *zap.Logger) error {
 	indexes := []mongo.IndexModel{
 		{
 			Keys: bson.D{{"timestamp", -1}},
@@ -62,23 +86,27 @@ func NewQueryAnalytics(mongoClient *mongo.Client, databaseName string) *QueryAna
 		{
 			Keys: bson.D{{"processing_success", 1}, {"timestamp", -1}},
 		},
+		{
+			Keys: bson.D{{"llm_provider", 1}},
+		},
+		{
+			Keys: bson.D{{"response_time", 1}},
+		},
 	}
 
-	logger := logger.MustGetLogger()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	_, err := collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
+		// Don't return an error for duplicate keys, as it's not a failure
 		if !mongo.IsDuplicateKeyError(err) {
-			logger.Warn("Failed to create query analytics indexes", zap.Error(err))
+			return fmt.Errorf("failed to create indexes: %w", err)
 		}
 	}
 
-	return &QueryAnalytics{
-		collection: collection,
-		logger:     logger,
-	}
+	logger.Info("Query analytics indexes created successfully")
+	return nil
 }
 
 // SaveQueryResponse saves a query response record to MongoDB

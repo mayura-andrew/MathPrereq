@@ -35,29 +35,33 @@ type ContentChunk struct {
 	Content    string `json:"content"`
 	Concept    string `json:"concept"`
 	Chapter    string `json:"chapter"`
-	Source     Source `json:"source"` // Keep as Source struct
+	Source     Source `json:"source"`
 	ChunkIndex int    `json:"chunk_index"`
 }
 
 type SearchResult struct {
-	Content string  `json:"content"`
-	Concept string  `json:"concept"`
-	Chapter string  `json:"chapter"`
-	Score   float32 `json:"score"`
+	Content  string                 `json:"content"`
+	Concept  string                 `json:"concept"`
+	Chapter  string                 `json:"chapter"`
+	Score    float32                `json:"score"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 func NewClient(cfg config.WeaviateConfig) (*Client, error) {
 	logger := logger.MustGetLogger()
 
-	APIKey := "bTJHVTdjOUlaT0xRVXJ1QV9OZkJJRFo5T3N0a1VoaGFkeXJqOTZXK25yamZtS1ZUSnBELzFoRGJpaXNvPV92MjAw"
+	// Use API key from config, not hardcoded
+	var authConfig auth.Config
+	if cfg.APIKey != "" {
+		authConfig = auth.ApiKey{Value: cfg.APIKey}
+	}
+
 	// Configure Weaviate client
 	weaviateConfig := weaviate.Config{
 		Host:       cfg.Host,
 		Scheme:     cfg.Scheme,
-		AuthConfig: auth.ApiKey{Value: APIKey},
-		 Headers: map[string]string{
-            "X-Weaviate-Cluster-Url": fmt.Sprintf("%s://%s", cfg.Scheme, cfg.Host),
-        },
+		AuthConfig: authConfig,
+		Headers:    cfg.Headers,
 	}
 
 	weaviateClient, err := weaviate.NewClient(weaviateConfig)
@@ -65,10 +69,16 @@ func NewClient(cfg config.WeaviateConfig) (*Client, error) {
 		return nil, fmt.Errorf("failed to create Weaviate client: %w", err)
 	}
 
+	// Use ClassName from config, with fallback
+	className := cfg.ClassName
+	if className == "" {
+		className = "MathChunk" // Default fallback
+	}
+
 	client := &Client{
 		client: weaviateClient,
 		logger: logger,
-		class:  cfg.Class,
+		class:  className,
 	}
 
 	// Test connection
@@ -83,7 +93,7 @@ func NewClient(cfg config.WeaviateConfig) (*Client, error) {
 
 	logger.Info("Weaviate client initialized successfully",
 		zap.String("host", cfg.Host),
-		zap.String("class", cfg.Class))
+		zap.String("class", className))
 
 	return client, nil
 }
@@ -103,7 +113,7 @@ func (c *Client) initSchema(ctx context.Context) error {
 	// Create class schema
 	classObj := &models.Class{
 		Class:      c.class,
-		Vectorizer: "text2vec-weaviate",
+		Vectorizer: "text2vec-openai", 
 		Properties: []*models.Property{
 			{
 				DataType:    []string{"text"},
@@ -210,17 +220,14 @@ func (c *Client) SemanticSearch(ctx context.Context, query string, limit int) ([
 	return searchResults, nil
 }
 
-// Helper function to safely extract string fields
-func getStringField(obj map[string]interface{}, field string) string {
-	if value, ok := obj[field].(string); ok {
-		return value
-	}
-	return ""
-}
-
 func (c *Client) AddContent(ctx context.Context, content []ContentChunk) error {
 	c.logger.Info("Adding content to vector store",
 		zap.Int("chunks", len(content)))
+
+	if len(content) == 0 {
+		c.logger.Warn("No content to add")
+		return nil
+	}
 
 	// Batch insert for better performance
 	batcher := c.client.Batch().ObjectsBatcher()
@@ -263,16 +270,25 @@ func (c *Client) AddContent(ctx context.Context, content []ContentChunk) error {
 
 	// Check for errors in batch result
 	if batchResult != nil {
+		errorCount := 0
 		for i, result := range batchResult {
 			if result.Result.Errors != nil && len(result.Result.Errors.Error) > 0 {
+				errorCount++
 				c.logger.Warn("Error adding content chunk",
 					zap.Int("chunk_index", i),
 					zap.Any("errors", result.Result.Errors.Error))
 			}
 		}
+
+		if errorCount > 0 {
+			c.logger.Warn("Some content chunks failed to insert",
+				zap.Int("total_chunks", len(content)),
+				zap.Int("failed_chunks", errorCount))
+		}
 	}
 
-	c.logger.Info("Successfully added content to vector store")
+	c.logger.Info("Successfully added content to vector store",
+		zap.Int("total_chunks", len(content)))
 	return nil
 }
 
@@ -304,19 +320,22 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 		return map[string]interface{}{
 			"total_chunks": int64(0),
 			"status":       "unhealthy",
+			"error":        err.Error(),
 		}, err
 	}
 
 	totalChunks := int64(0)
-	if result.Data["Aggregate"] != nil {
-		if classData, ok := result.Data["Aggregate"].(map[string]interface{})[c.class]; ok {
-			if objects, ok := classData.([]interface{}); ok && len(objects) > 0 {
-				if objMap, ok := objects[0].(map[string]interface{}); ok {
-					if meta, exists := objMap["meta"]; exists {
-						if metaMap, ok := meta.(map[string]interface{}); ok {
-							if count, exists := metaMap["count"]; exists {
-								if countFloat, ok := count.(float64); ok {
-									totalChunks = int64(countFloat)
+	if result.Data != nil {
+		if aggregate, ok := result.Data["Aggregate"].(map[string]interface{}); ok {
+			if classData, ok := aggregate[c.class]; ok {
+				if objects, ok := classData.([]interface{}); ok && len(objects) > 0 {
+					if objMap, ok := objects[0].(map[string]interface{}); ok {
+						if meta, exists := objMap["meta"]; exists {
+							if metaMap, ok := meta.(map[string]interface{}); ok {
+								if count, exists := metaMap["count"]; exists {
+									if countFloat, ok := count.(float64); ok {
+										totalChunks = int64(countFloat)
+									}
 								}
 							}
 						}
@@ -329,15 +348,17 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"total_chunks": totalChunks,
 		"status":       "healthy",
+		"class":        c.class,
 	}, nil
 }
 
 func (c *Client) DeleteAll(ctx context.Context) error {
 	c.logger.Info("Deleting all content from vector store")
 
-	// Delete the entire class and recreate it
+	// Delete the entire class
 	err := c.client.Schema().ClassDeleter().WithClassName(c.class).Do(ctx)
 	if err != nil {
+		c.logger.Error("Failed to delete class", zap.Error(err))
 		return fmt.Errorf("failed to delete class: %w", err)
 	}
 
@@ -346,6 +367,26 @@ func (c *Client) DeleteAll(ctx context.Context) error {
 		return fmt.Errorf("failed to recreate schema: %w", err)
 	}
 
-	c.logger.Info("Successfully deleted all content")
+	c.logger.Info("Successfully deleted all content and recreated schema")
 	return nil
+}
+
+// Search method to match repository interface expectations
+func (c *Client) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	return c.SemanticSearch(ctx, query, limit)
+}
+
+// Close method for graceful shutdown
+func (c *Client) Close() error {
+	// Weaviate client doesn't require explicit closing
+	c.logger.Info("Weaviate client closed")
+	return nil
+}
+
+// Helper function to safely extract string fields
+func getStringField(obj map[string]interface{}, field string) string {
+	if value, ok := obj[field].(string); ok {
+		return value
+	}
+	return ""
 }
