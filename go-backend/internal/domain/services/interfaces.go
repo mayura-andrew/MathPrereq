@@ -24,6 +24,9 @@ type QueryService interface {
 
 	// Smart concept query - checks cache first, then processes if needed
 	SmartConceptQuery(ctx context.Context, conceptName, userID, requestID string) (*QueryResult, error)
+
+	// Debug and maintenance methods
+	GetCachedConcepts(ctx context.Context, limit int) ([]entities.Query, error)
 }
 
 type ResourceService interface {

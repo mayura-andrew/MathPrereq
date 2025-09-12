@@ -37,8 +37,8 @@ type QueryResponse struct {
 
 // ConceptQueryRequest represents a smart concept query request
 type ConceptQueryRequest struct {
-	ConceptName string `json:"concept_name" binding:"required" validate:"required,min=2,max=100"`
-	UserID      string `json:"user_id,omitempty" validate:"max=50"`
+	ConceptName string `json:"ConceptName" binding:"required" validate:"required,min=2,max=100"`
+	UserID      string `json:"UserID,omitempty" validate:"max=50"`
 }
 
 // ConceptQueryResponse represents the response for concept queries

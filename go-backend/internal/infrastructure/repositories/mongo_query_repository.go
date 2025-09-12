@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/mathprereq/internal/domain/entities"
@@ -53,11 +54,38 @@ func (r *mongoQueryRepository) FindByConceptName(ctx context.Context, conceptNam
 	collection := r.database.Collection("queries")
 
 	// Create filter to find successful queries with the concept in identified_concepts
+	// Use case-insensitive regex for better matching
 	filter := bson.M{
-		"identified_concepts": bson.M{
-			"$in": []string{conceptName},
+		"$and": []bson.M{
+			{
+				"$or": []bson.M{
+					{
+						"identified_concepts": bson.M{
+							"$in": []string{conceptName},
+						},
+					},
+					{
+						"identified_concepts": bson.M{
+							"$regex": fmt.Sprintf("(?i)^%s$", regexp.QuoteMeta(conceptName)),
+						},
+					},
+					{
+						"text": bson.M{
+							"$regex": fmt.Sprintf("(?i)\\b%s\\b", regexp.QuoteMeta(conceptName)),
+						},
+					},
+				},
+			},
+			{
+				"success": true,
+			},
+			{
+				"response.explanation": bson.M{
+					"$exists": true,
+					"$ne":     "",
+				},
+			},
 		},
-		"success": true,
 	}
 
 	// Sort by timestamp descending to get the most recent match

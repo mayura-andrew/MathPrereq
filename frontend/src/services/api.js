@@ -59,63 +59,114 @@ export const mathAPI = {
     }
   },
 
-  // 🆕 Smart concept query - FIXED to use working endpoint
+  // 🆕 Smart concept query - Try multiple approaches to match Go struct
   async smartConceptQuery(conceptName, options = {}) {
     try {
-      // Ensure concept name is not too long and is properly formatted
+      // Validate input
+      if (!conceptName || typeof conceptName !== 'string') {
+        throw new Error('Invalid concept name provided');
+      }
+
       const cleanConceptName = conceptName.trim();
       
-      // Backend validation limit - adjust this based on your backend's max length
-      // From the error, it seems the backend has a strict max length validation
-      const maxLength = 50; // Conservative limit
-      const question = cleanConceptName.length > maxLength ? 
-        cleanConceptName.substring(0, maxLength) : 
-        cleanConceptName;
+      if (!cleanConceptName) {
+        throw new Error('Concept name cannot be empty');
+      }
+      
+      // Backend validation: min=2, max=100
+      if (cleanConceptName.length < 2) {
+        throw new Error('Concept name must be at least 2 characters long');
+      }
+      
+      if (cleanConceptName.length > 100) {
+        cleanConceptName = cleanConceptName.substring(0, 100);
+      }
 
-      console.log(`🧠 Querying concept: "${question}" (original: "${cleanConceptName}")`);
+      console.log(`🧠 Querying concept: "${cleanConceptName}"`);
 
-      // Use the working /query endpoint that we know works
-      const response = await api.post('/query', {
-        question: question, // Use 'question' field as expected by backend
-        context: null
-      }, {
-        timeout: options.timeout || 120000, // Use same timeout as processQuery
-        headers: {
-          'X-Request-ID': `concept-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-        }
-      });
-      
-      console.log("✅ Smart concept query response:", response.data);
-      return response.data;
-      
-    } catch (error) {
-      console.error(`❌ Failed to get concept: "${conceptName}"`, error);
-      
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-        
-        // If it's still a validation error, try with even shorter text
-        if (error.response.data?.error?.includes('max')) {
-          console.log('🔄 Retrying with shorter concept name...');
-          try {
-            const shortQuestion = conceptName.trim().substring(0, 20);
-            const retryResponse = await api.post('/query', {
-              question: shortQuestion,
-              context: null
-            }, {
-              timeout: options.timeout || 120000
-            });
-            
-            console.log("✅ Retry successful:", retryResponse.data);
-            return retryResponse.data;
-          } catch (retryError) {
-            console.error('❌ Retry also failed:', retryError);
+      // First attempt: Use JSON tag format (this should be correct)
+      const requestBody1 = {
+        concept_name: cleanConceptName,
+        user_id: options.userId || undefined
+      };
+
+      console.log('📤 Attempt 1 - JSON tag format:', JSON.stringify(requestBody1, null, 2));
+
+      try {
+        const response = await api.post('/concept-query', requestBody1, {
+          timeout: options.timeout || 120000,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-ID': `concept-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
           }
+        });
+        
+        console.log("✅ Smart concept query response:", response.data);
+        return response.data;
+      } catch (firstError) {
+        console.error('❌ First attempt failed:', firstError.response?.data);
+        
+        // Second attempt: Use struct field names (if JSON tags aren't working)
+        console.log('🔄 Attempt 2 - Struct field format...');
+        const requestBody2 = {
+          ConceptName: cleanConceptName,
+          UserID: options.userId || ""
+        };
+
+        console.log('📤 Attempt 2 - Struct field format:', JSON.stringify(requestBody2, null, 2));
+
+        try {
+          const response2 = await api.post('/concept-query', requestBody2, {
+            timeout: options.timeout || 120000,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-ID': `concept-2nd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            }
+          });
+          
+          console.log("✅ Second attempt successful:", response2.data);
+          return response2.data;
+        } catch (secondError) {
+          console.error('❌ Second attempt failed:', secondError.response?.data);
+          
+          // Third attempt: Try camelCase
+          console.log('🔄 Attempt 3 - camelCase format...');
+          const requestBody3 = {
+            conceptName: cleanConceptName,
+            userId: options.userId || ""
+          };
+
+          console.log('📤 Attempt 3 - camelCase format:', JSON.stringify(requestBody3, null, 2));
+
+          const response3 = await api.post('/concept-query', requestBody3, {
+            timeout: options.timeout || 120000,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-ID': `concept-3rd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            }
+          });
+          
+          console.log("✅ Third attempt successful:", response3.data);
+          return response3.data;
         }
       }
       
-      throw new Error(error.response?.data?.error || error.response?.data?.detail || `Failed to get concept information for: ${conceptName}`);
+    } catch (error) {
+      console.error(`❌ All attempts failed for concept: "${conceptName}"`, error);
+      
+      // Provide detailed error information
+      if (error.response) {
+        const errorDetails = {
+          status: error.response.status,
+          data: error.response.data,
+          headers: error.response.headers
+        };
+        console.error('Error details:', errorDetails);
+        
+        throw new Error(`concept-query endpoint failed: ${error.response.data?.error || error.response.data?.message || error.message}`);
+      }
+      
+      throw new Error(`Failed to get concept information for: ${conceptName}. ${error.message}`);
     }
   },
 

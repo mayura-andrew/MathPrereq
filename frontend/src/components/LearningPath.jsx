@@ -57,6 +57,12 @@ const LearningPath = ({ learningPath }) => {
   }
 
   const startLearning = async (concept) => {
+    // Validate concept name
+    if (!concept.name || typeof concept.name !== 'string' || concept.name.trim() === '') {
+      console.error('❌ Invalid concept name:', concept);
+      return;
+    }
+
     // Check if tab already exists
     const existingTab = learningTabs.find(tab => tab.concept === concept.name)
     
@@ -86,6 +92,8 @@ const LearningPath = ({ learningPath }) => {
     setLoadingConcept(true)
 
     try {
+      console.log(`🚀 Starting learning for concept: "${concept.name}"`);
+      
       // Get detailed concept information using the correct API endpoint
       const conceptDetail = await mathAPI.smartConceptQuery(concept.name)
       
@@ -120,7 +128,7 @@ const LearningPath = ({ learningPath }) => {
         tab.id === tabId ? {
           ...tab,
           loading: false,
-          error: 'Failed to load detailed information for this concept. Please try again.'
+          error: `Failed to load detailed information for "${concept.name}". ${error.message || 'Please try again.'}`
         } : tab
       ))
     } finally {

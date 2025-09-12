@@ -241,9 +241,38 @@ func (s *queryService) GetResourcesForConcepts(ctx context.Context, conceptNames
 
 // FindCachedConceptQuery searches for existing queries that match the concept
 func (s *queryService) FindCachedConceptQuery(ctx context.Context, conceptName string) (*entities.Query, error) {
-	// Search for queries where the concept appears in identified_concepts
-	// and the query was successful
-	return s.queryRepo.FindByConceptName(ctx, conceptName)
+	// Normalize the concept name for better matching
+	normalizedConcept := strings.TrimSpace(strings.ToLower(conceptName))
+
+	// Try multiple search strategies
+	searchStrategies := []string{
+		conceptName,                      // Exact match
+		normalizedConcept,                // Normalized match
+		strings.Title(normalizedConcept), // Title case
+	}
+
+	for _, searchTerm := range searchStrategies {
+		query, err := s.queryRepo.FindByConceptName(ctx, searchTerm)
+		if err != nil {
+			s.logger.Warn("Error searching for cached concept",
+				zap.String("search_term", searchTerm),
+				zap.Error(err))
+			continue
+		}
+
+		if query != nil {
+			s.logger.Info("Found cached concept query",
+				zap.String("concept", conceptName),
+				zap.String("search_term", searchTerm),
+				zap.String("cached_query_id", query.ID),
+				zap.Time("cached_at", query.Timestamp))
+			return query, nil
+		}
+	}
+
+	// No cached query found
+	s.logger.Info("No cached query found for concept", zap.String("concept", conceptName))
+	return nil, nil
 }
 
 // SmartConceptQuery checks cache first, then processes if needed
@@ -255,62 +284,167 @@ func (s *queryService) SmartConceptQuery(ctx context.Context, conceptName, userI
 		zap.String("user_id", userID),
 		zap.String("request_id", requestID))
 
-	// Step 1: Try to find cached query for this concept
+	// Step 1: Try to find cached query for this concept in MongoDB
+	s.logger.Info("Checking MongoDB cache for concept", zap.String("concept", conceptName))
+
 	cachedQuery, err := s.FindCachedConceptQuery(ctx, conceptName)
 	if err != nil {
-		s.logger.Warn("Failed to search cached queries", zap.Error(err))
+		s.logger.Warn("Failed to search MongoDB cache",
+			zap.String("concept", conceptName),
+			zap.Error(err))
 		// Continue to fresh processing if cache search fails
 	}
 
-	// Step 2: If we have cached data and it's relatively recent (within 7 days), return it
-	if cachedQuery != nil && cachedQuery.Timestamp.After(time.Now().Add(-7*24*time.Hour)) {
-		s.logger.Info("Returning cached concept query",
-			zap.String("concept", conceptName),
-			zap.String("cached_query_id", cachedQuery.ID),
-			zap.Time("cached_at", cachedQuery.Timestamp))
+	// Step 2: If we have cached data and it's relatively recent (within 30 days), return it
+	if cachedQuery != nil {
+		cacheAge := time.Since(cachedQuery.Timestamp)
+		maxCacheAge := 30 * 24 * time.Hour // 30 days for math concepts
 
-		// Get existing resources for the concept in background
-		go func() {
-			if s.resourceScraper != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				conceptID := s.generateConceptID(conceptName)
-				_, _ = s.resourceScraper.GetResourcesForConcept(ctx, conceptID, 5)
+		if cacheAge < maxCacheAge {
+			s.logger.Info("Returning cached concept data",
+				zap.String("concept", conceptName),
+				zap.String("cached_query_id", cachedQuery.ID),
+				zap.Time("cached_at", cachedQuery.Timestamp),
+				zap.Duration("cache_age", cacheAge))
+
+			// Start background resource gathering (non-blocking)
+			go s.gatherResourcesInBackground(ctx, conceptName, cachedQuery.IdentifiedConcepts)
+
+			// Convert cached query to QueryResult
+			result := &services.QueryResult{
+				Query:              cachedQuery,
+				IdentifiedConcepts: cachedQuery.IdentifiedConcepts,
+				PrerequisitePath:   cachedQuery.PrerequisitePath,
+				RetrievedContext:   cachedQuery.Response.RetrievedContext,
+				Explanation:        cachedQuery.Response.Explanation,
+				ProcessingTime:     time.Since(startTime),
+				RequestID:          requestID,
 			}
-		}()
 
-		// Convert cached query to QueryResult
-		result := &services.QueryResult{
-			Query:              cachedQuery,
-			IdentifiedConcepts: cachedQuery.IdentifiedConcepts,
-			PrerequisitePath:   cachedQuery.PrerequisitePath,
-			RetrievedContext:   cachedQuery.Response.RetrievedContext,
-			Explanation:        cachedQuery.Response.Explanation,
-			ProcessingTime:     time.Since(startTime),
+			s.logger.Info("Smart concept query completed from cache",
+				zap.String("concept", conceptName),
+				zap.Duration("total_time", result.ProcessingTime),
+				zap.Duration("cache_age", cacheAge))
+
+			return result, nil
+		} else {
+			s.logger.Info("Cached data is too old, processing fresh query",
+				zap.String("concept", conceptName),
+				zap.Duration("cache_age", cacheAge),
+				zap.Duration("max_age", maxCacheAge))
 		}
-
-		return result, nil
+	} else {
+		s.logger.Info("No cached data found, processing fresh query",
+			zap.String("concept", conceptName))
 	}
 
 	// Step 3: No suitable cached data found, process fresh query
-	s.logger.Info("No suitable cached data found, processing fresh query",
-		zap.String("concept", conceptName))
+	s.logger.Info("Processing fresh concept query", zap.String("concept", conceptName))
 
 	// Create a query request for the concept name
+	// Use a more specific prompt for better concept explanation
+	conceptQuestion := s.buildConceptQueryPrompt(conceptName)
+
 	queryReq := &services.QueryRequest{
 		UserID:    userID,
-		Question:  fmt.Sprintf("Explain %s in detail with prerequisites and examples", conceptName),
+		Question:  conceptQuestion,
 		RequestID: requestID,
 	}
 
-	// Process the query normally
-	return s.ProcessQuery(ctx, queryReq)
+	// Process the query through the normal pipeline
+	result, err := s.ProcessQuery(ctx, queryReq)
+	if err != nil {
+		s.logger.Error("Fresh concept query processing failed",
+			zap.String("concept", conceptName),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to process fresh concept query: %w", err)
+	}
+
+	s.logger.Info("Smart concept query completed with fresh processing",
+		zap.String("concept", conceptName),
+		zap.Duration("total_time", time.Since(startTime)),
+		zap.Int("identified_concepts", len(result.IdentifiedConcepts)),
+		zap.Int("prerequisite_path_length", len(result.PrerequisitePath)))
+
+	return result, nil
 }
 
-// generateConceptID creates a standardized concept ID (same logic as scraper)
+// buildConceptQueryPrompt creates an optimized prompt for concept explanation
+func (s *queryService) buildConceptQueryPrompt(conceptName string) string {
+	// Create a comprehensive prompt that encourages detailed explanation
+	return fmt.Sprintf(`Please provide a comprehensive explanation of the mathematical concept "%s". 
+
+Include the following in your explanation:
+1. Definition and core principles
+2. Prerequisites needed to understand this concept
+3. Key formulas or theorems (if applicable)
+4. Step-by-step examples with clear explanations
+5. Common applications and real-world uses
+6. Common mistakes students make and how to avoid them
+7. Connections to other mathematical concepts
+
+Make the explanation educational, detailed, and suitable for students learning this concept.`, conceptName)
+}
+
+// gatherResourcesInBackground starts resource gathering without blocking the response
+func (s *queryService) gatherResourcesInBackground(ctx context.Context, conceptName string, identifiedConcepts []string) {
+	s.logger.Info("Starting background resource gathering",
+		zap.String("concept", conceptName),
+		zap.Strings("identified_concepts", identifiedConcepts))
+
+	// Create a background context with timeout
+	bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// Use all concepts for resource gathering (both original concept and identified ones)
+	allConcepts := []string{conceptName}
+	allConcepts = append(allConcepts, identifiedConcepts...)
+
+	// Remove duplicates
+	uniqueConcepts := s.removeDuplicateStrings(allConcepts)
+
+	// Limit concepts to avoid excessive scraping
+	maxConcepts := 3
+	if len(uniqueConcepts) > maxConcepts {
+		uniqueConcepts = uniqueConcepts[:maxConcepts]
+		s.logger.Info("Limited background concept scraping",
+			zap.Int("max_concepts", maxConcepts),
+			zap.String("original_concept", conceptName))
+	}
+
+	// Start background scraping
+	if s.resourceScraper != nil {
+		if err := s.resourceScraper.ScrapeResourcesForConcepts(bgCtx, uniqueConcepts); err != nil {
+			s.logger.Warn("Background resource gathering failed",
+				zap.Error(err),
+				zap.String("concept", conceptName),
+				zap.Strings("concepts", uniqueConcepts))
+		} else {
+			s.logger.Info("Background resource gathering completed",
+				zap.String("concept", conceptName),
+				zap.Strings("concepts", uniqueConcepts))
+		}
+	}
+} // generateConceptID creates a standardized concept ID (same logic as scraper)
 func (s *queryService) generateConceptID(conceptName string) string {
 	// Use same logic as scraper to ensure consistency
 	return strings.ToLower(strings.ReplaceAll(conceptName, " ", "_"))
+}
+
+// removeDuplicateStrings removes duplicate strings from a slice
+func (s *queryService) removeDuplicateStrings(input []string) []string {
+	keys := make(map[string]bool)
+	var result []string
+
+	for _, item := range input {
+		normalized := strings.TrimSpace(strings.ToLower(item))
+		if !keys[normalized] && normalized != "" {
+			keys[normalized] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
 }
 
 // Implement remaining service methods
@@ -336,6 +470,37 @@ func (s *queryService) GetQueryTrends(ctx context.Context, days int) ([]reposito
 
 func (s *queryService) GetSystemStats(ctx context.Context) (*types.SystemStats, error) {
 	return s.conceptRepo.GetStats(ctx)
+}
+
+// GetCachedConcepts returns a list of all cached concept queries for debugging
+func (s *queryService) GetCachedConcepts(ctx context.Context, limit int) ([]entities.Query, error) {
+	queries, err := s.queryRepo.FindByUserID(ctx, "", limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cached concepts: %w", err)
+	}
+
+	result := make([]entities.Query, len(queries))
+	for i, query := range queries {
+		result[i] = *query
+	}
+
+	s.logger.Info("Retrieved cached concepts for debugging",
+		zap.Int("count", len(result)))
+
+	return result, nil
+}
+
+// ClearConceptCache removes old cached concept queries (for maintenance)
+func (s *queryService) ClearConceptCache(ctx context.Context, olderThanDays int) error {
+	cutoffDate := time.Now().AddDate(0, 0, -olderThanDays)
+
+	// This would need to be implemented in the repository
+	// For now, just log the request
+	s.logger.Info("Concept cache clear requested",
+		zap.Time("cutoff_date", cutoffDate),
+		zap.Int("older_than_days", olderThanDays))
+
+	return nil
 }
 
 func min(a, b int) int {

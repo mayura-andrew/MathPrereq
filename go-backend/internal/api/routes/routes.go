@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -109,6 +110,42 @@ func SetupRoutes(
 				c.JSON(200, gin.H{
 					"health_status": health,
 					"all_healthy":   allHealthy(health),
+				})
+			})
+
+			// New debug endpoint for cached concepts
+			debug.GET("/cached-concepts", func(c *gin.Context) {
+				limit := 20 // Default limit
+				if limitStr := c.Query("limit"); limitStr != "" {
+					if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+						limit = parsedLimit
+					}
+				}
+
+				queries, err := container.QueryService().GetCachedConcepts(c.Request.Context(), limit)
+				if err != nil {
+					c.JSON(500, gin.H{"error": err.Error()})
+					return
+				}
+
+				// Simplify response for debugging
+				simplified := make([]gin.H, len(queries))
+				for i, query := range queries {
+					simplified[i] = gin.H{
+						"id":                  query.ID,
+						"identified_concepts": query.IdentifiedConcepts,
+						"timestamp":           query.Timestamp,
+						"success":             query.Success,
+						"explanation_length":  len(query.Response.Explanation),
+						"prerequisite_count":  len(query.PrerequisitePath),
+					}
+				}
+
+				c.JSON(200, gin.H{
+					"cached_concepts": simplified,
+					"total_count":     len(simplified),
+					"limit":           limit,
+					"timestamp":       time.Now(),
 				})
 			})
 		}
