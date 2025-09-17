@@ -94,6 +94,7 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/google/uuid v1.6.0
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0-alpha.1
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
