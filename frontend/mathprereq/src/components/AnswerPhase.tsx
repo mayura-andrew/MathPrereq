@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
@@ -7,14 +7,15 @@ import Typography from '@mui/material/Typography';
 import StepByStepAnswer from './StepByStepAnswer';
 import LearningPath from './LearningPath';
 import VisualRoadmap from './VisualRoadmap';
+import type { LearningPath as LearningPathType } from '../types/api';
 
-function getLearningPath(answer: unknown): unknown[] {
-  if (!answer) return [];
+function getLearningPath(answer: unknown): LearningPathType | undefined {
+  if (!answer) return undefined;
   const a = answer as Record<string, unknown>;
-  if (Array.isArray(a.learning_path)) return a.learning_path as unknown[];
-  if (Array.isArray(a.prerequisites)) return a.prerequisites as unknown[];
-  if (Array.isArray(a.concepts)) return a.concepts as unknown[];
-  return [];
+  if (a.learning_path && typeof a.learning_path === 'object') {
+    return a.learning_path as LearningPathType;
+  }
+  return undefined;
 }
 
 export default function AnswerPhase({ question, answer, onSave, onNewQuestion, isSaved }:
@@ -41,7 +42,7 @@ export default function AnswerPhase({ question, answer, onSave, onNewQuestion, i
       <Box mt={2}>
         {active === 0 && <StepByStepAnswer answer={answer} />}
         {active === 1 && <LearningPath learningPath={learningPathArray} />}
-        {active === 2 && <VisualRoadmap learningPath={learningPathArray} />}
+        {active === 2 && learningPathArray && <VisualRoadmap learningPath={learningPathArray} />}
       </Box>
     </Box>
   );

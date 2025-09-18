@@ -14,14 +14,15 @@ import MenuIcon from '@mui/icons-material/Menu';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import HistoryIcon from '@mui/icons-material/History';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import Chat from './Chat';
-import type { Message as MessageType } from './Chat';
-const ConceptMap = React.lazy(() => import('./ConceptMap'));
-import type { Concept } from './ConceptMap';
+import type { Message, QueryResponse } from '../types/api';
 import Resources from './Resources';
 import History from './History';
 import MapIcon from '@mui/icons-material/Map';
 import CircularProgress from '@mui/material/CircularProgress';
+import ConceptMap from './ConceptMap';
+import { mathAPI } from '../services/api';
 
 // Calm color theme for the research UI
 const customTheme = createTheme({
@@ -33,9 +34,6 @@ const customTheme = createTheme({
     text: { primary: '#0F172A', secondary: '#475569' }
   },
   shape: { borderRadius: 10 },
-  components: {
-    MuiPaper: { styleOverrides: { root: { borderRadius: 10 } } },
-  }
 });
 
 type Resource = { id: number; title: string; type: string; source?: string; duration?: string; url?: string; difficulty?: string };
@@ -46,8 +44,8 @@ export default function MathLearningApp() {
   // UI state
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'chat' | 'map'>('chat');
-  const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false); // new state for right panel
 
   // Debounced search (client-side only)
   const debounceRef = useRef<number | null>(null);
@@ -74,34 +72,60 @@ export default function MathLearningApp() {
   }, [query, resources]);
 
   // Chat state
-  const [messages, setMessages] = useState<MessageType[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const onSubmit = useCallback((e?: React.FormEvent) => {
+  const onSubmit = useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input) return;
-    const next: MessageType = { id: Date.now(), text: input, role: 'user' };
-    setMessages(m => [...m, next]);
+    if (!input.trim()) return;
+
+    const userMessage: Message = { id: Date.now(), text: input, role: 'user' };
+    setMessages(m => [...m, userMessage]);
     setInput('');
     setIsLoading(true);
-    // simulate async bot reply
-    setTimeout(() => {
-      setMessages(m => [...m, { id: Date.now() + 1, text: 'This is an automated reply.', role: 'bot' }]);
+
+    try {
+      // Use real API call
+      const response = await mathAPI.processQuery(input.trim());
+
+      const botMessage: Message = {
+        id: Date.now() + 1,
+        text: response,
+        role: 'bot'
+      };
+
+      setMessages(m => [...m, botMessage]);
+    } catch (error) {
+      console.error('API Error:', error);
+
+      // Fallback to mock response on error
+      const mockResponse: QueryResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        request_id: 'fallback-' + Date.now(),
+        timestamp: new Date().toISOString(),
+        query: input,
+        identified_concepts: [],
+        learning_path: {
+          concepts: [],
+          total_concepts: 0,
+        },
+        explanation: 'Sorry, there was an error processing your question. Please try again.',
+        retrieved_context: [],
+        processing_time: '0.00s',
+      };
+
+      const botMessage: Message = {
+        id: Date.now() + 1,
+        text: mockResponse,
+        role: 'bot'
+      };
+
+      setMessages(m => [...m, botMessage]);
+    } finally {
       setIsLoading(false);
-    }, 700);
+    }
   }, [input]);
-
-  // Concept map data
-  const [concepts] = useState<Concept[]>(() => [
-    { id: 1, title: 'Algebra', description: 'Variables, equations, manipulation' },
-    { id: 2, title: 'Calculus', description: 'Limits, derivatives, integrals' },
-    { id: 3, title: 'Precalculus', description: 'Functions, trig, basics' },
-  ]);
-
-  const onSelectConcept = useCallback((c: Concept) => {
-    setSelectedConcept(c);
-    setMessages(m => [...m, { id: Date.now(), text: `Selected concept: ${c.title}`, role: 'user' }]);
-  }, []);
 
   const onHistorySelect = useCallback((text: string) => {
     setInput(text);
@@ -109,9 +133,15 @@ export default function MathLearningApp() {
     if (isMobile) setHistoryOpen(false);
   }, [isMobile]);
 
+  const topOffset = isMobile ? 56 : 0; // mobile AppBar height
+
+  // Extract learning path from last bot message
+  const lastBot = [...messages].reverse().find(m => m.role === 'bot');
+  const learningPathData = lastBot ? ((lastBot.text as QueryResponse)?.learning_path) : null;
+
   // Layout helpers
   const renderMain = (
-    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
+    <Box sx={{ height: `calc(100vh - ${topOffset}px)`, display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1, borderBottom: 1, borderColor: 'divider' }}>
         <IconButton aria-label="toggle history" onClick={() => setHistoryOpen(v => !v)} sx={{ mr: 1, color: 'primary.main' }}>
           <HistoryIcon />
@@ -128,39 +158,62 @@ export default function MathLearningApp() {
 
         <Box sx={{ px: 1, display: 'flex', alignItems: 'center' }}>
           <Typography variant="subtitle1" sx={{ mr: 1, color: 'text.primary' }}>
-            {selectedConcept ? selectedConcept.title : 'Learning Path'}
+            Learning Path
           </Typography>
+          <IconButton aria-label="toggle right panel" onClick={() => setRightPanelOpen(v => !v)} sx={{ color: 'primary.main' }}>
+            {rightPanelOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+          </IconButton>
         </Box>
       </Box>
 
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <Box sx={{ flex: 1, minWidth: 320, borderRight: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+        <Box sx={{ flex: 1, minWidth: 320, borderRight: 1, borderColor: 'divider', bgcolor: 'background.paper', height: `calc(100vh - ${topOffset}px)` }}>
           {view === 'chat' ? (
-            <Chat messages={messages} input={input} setInput={setInput} onSubmit={onSubmit} isLoading={isLoading} />
+            <Chat messages={messages} input={input} setInput={setInput} onSubmit={onSubmit} isLoading={isLoading} onNewQuestion={function (): void {
+              setMessages([]);
+              setInput('');
+            } } />
           ) : (
             <Suspense fallback={<Box sx={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}><CircularProgress /></Box>}>
-              <ConceptMap concepts={concepts} onSelect={onSelectConcept} />
+              <ConceptMap concepts={learningPathData?.concepts || []} />
             </Suspense>
           )}
         </Box>
 
         {/* Right within center: details when concept selected */}
-        <Box sx={{ width: 360, borderLeft: 1, borderColor: 'divider', display: { xs: 'none', sm: 'block' }, p:1 }}>
-          {/* Details panel: when a concept is selected show details and related resources */}
-          {selectedConcept ? (
-            <Paper variant="outlined" sx={{ p: 2, height: '100%', borderRadius: 2 }}>
-              <Typography variant="h6">{selectedConcept.title}</Typography>
-              <Typography color="text.secondary" sx={{ mb: 1 }}>{selectedConcept.description}</Typography>
-              {/* Ideally show curated resources related to this concept */}
-              <Resources resources={filteredResources} onSearch={onSearch} selectedConcept={selectedConcept} />
+        {rightPanelOpen && (
+          <Box sx={{ width: 360, borderLeft: 1, borderColor: 'divider', display: { xs: 'none', sm: 'block' }, p:1 }}>
+            <Paper variant="outlined" sx={{ p: 2, height: `calc(100vh - ${topOffset}px)`, borderRadius: 2, overflow: 'auto' }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Learning Path</Typography>
+              {learningPathData?.concepts && learningPathData.concepts.length > 0 ? (
+                <Box>
+                  {learningPathData.concepts.map((concept, index: number) => (
+                    <Box key={concept.id || index} sx={{ mb: 2, p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+                      <Typography variant="subtitle1">{concept.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">{concept.description}</Typography>
+                      {/* Add resources here if available */}
+                      {concept.resources && (
+                        <Box sx={{ mt: 1 }}>
+                          <Typography variant="caption">Resources:</Typography>
+                          {concept.resources.map((res, i) => (
+                            <Typography key={i} variant="body2">{(res as { title: string }).title}</Typography>
+                          ))}
+                        </Box>
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+              ) : (
+                <Typography color="text.secondary">No learning path available yet. Ask a question to generate one.</Typography>
+              )}
+              {/* Resources section */}
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="h6" sx={{ mb: 1 }}>Learning Resources</Typography>
+                <Resources resources={filteredResources} onSearch={onSearch} selectedConcept={null} />
+              </Box>
             </Paper>
-          ) : (
-            <Paper variant="outlined" sx={{ p: 2, height: '100%', borderRadius: 2 }}>
-              <Typography variant="h6">Overview</Typography>
-              <Typography color="text.secondary">Select a concept to see details and resources.</Typography>
-            </Paper>
-          )}
-        </Box>
+          </Box>
+        )}
       </Box>
     </Box>
   );
@@ -192,7 +245,7 @@ export default function MathLearningApp() {
           // Desktop: show full panel when open, otherwise a compact toggle column
           historyOpen ? (
             <Box sx={{ width: 300, p: 1, transition: 'width 200ms ease' }}>
-              <Paper sx={{ height: '100%', borderRadius: 2, overflow: 'hidden' }}>
+              <Paper sx={{ height: `calc(100vh - ${topOffset}px)`, borderRadius: 2, overflow: 'hidden' }}>
                 <History messages={messages} onSelect={onHistorySelect} />
               </Paper>
             </Box>
