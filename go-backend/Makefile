@@ -407,3 +407,56 @@ setup: deps docker-up db-setup build-go
 	@echo "Development environment setup complete!"
 	@echo "Run 'make dev' to start the development server"
 	@echo "Run 'make demo' to open the resources demo page"
+
+# Build both C++ and Go components
+all: build-cpp build-go
+
+# Build C++ components first (they may provide libraries Go needs)
+build-cpp:
+	@echo "🔨 Building C++ components..."
+	cd cpp && make
+	@echo "✅ C++ build complete"
+
+# Build Go application (may link C++ libraries)
+build-go: build-cpp
+	@echo "🔨 Building Go application container..."
+	go mod tidy
+	CGO_ENABLED=1 go build -o bin/server cmd/server/main.go
+	@echo "✅ Go build complete"
+
+# Test repository initialization
+test-repos: build-go
+	@echo "🧪 Testing repository initialization..."
+	go test ./internal/container/... -v -run TestInitializeRepositories
+
+# Test PDF extraction
+test-pdf: build-go
+	@echo "🧪 Testing PDF extraction..."
+	go run cmd/migrate/test-pdf.go data/raw/university-curriculus/Unit-1-algebra.pdf
+
+# Run PDF migration
+migrate-pdf: build-go
+	@echo "🚀 Running PDF to Weaviate migration..."
+	go run cmd/migrate/pdf-to-weaviate.go
+
+# Test the full application stack
+test: build-go
+	@echo "🧪 Testing hybrid C++/Go application..."
+	go test ./...
+	cd cpp && make test
+
+# Run application with all services
+run: build-go
+	@echo "🚀 Starting hybrid C++/Go application..."
+	./bin/server
+
+# Development mode with verbose logging
+dev: build-go
+	@echo "🚀 Starting in development mode..."
+	LOG_LEVEL=debug LOG_FORMAT=console ./bin/server
+
+clean:
+	@echo "🧹 Cleaning build artifacts..."
+	rm -rf bin/
+	cd cpp && make clean
+	@echo "✅ Clean complete"
