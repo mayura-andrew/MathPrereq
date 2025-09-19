@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useRef, Suspense } from 'react';
+import React, { useState, Suspense } from 'react';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import ToggleButton from '@mui/material/ToggleButton';
@@ -17,12 +17,14 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import Chat from './Chat';
 import type { Message, QueryResponse } from '../types/api';
-import Resources from './Resources';
 import History from './History';
 import MapIcon from '@mui/icons-material/Map';
 import CircularProgress from '@mui/material/CircularProgress';
 import ConceptMap from './ConceptMap';
 import { mathAPI } from '../services/api';
+import SchoolIcon from '@mui/icons-material/School';
+import LearnView from './LearnView';
+import Button from '@mui/material/Button';
 
 // Calm color theme for the research UI
 const customTheme = createTheme({
@@ -36,46 +38,19 @@ const customTheme = createTheme({
   shape: { borderRadius: 10 },
 });
 
-type Resource = { id: number; title: string; type: string; source?: string; duration?: string; url?: string; difficulty?: string };
-
 export default function MathLearningApp() {
   const isMobile = useMediaQuery(customTheme.breakpoints.down('sm'));
 
   // UI state
-  const [query, setQuery] = useState('');
-  const [view, setView] = useState<'chat' | 'map'>('chat');
+  const [view, setView] = useState<'chat' | 'map' | 'learn'>('chat');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false); // new state for right panel
-
-  // Debounced search (client-side only)
-  const debounceRef = useRef<number | null>(null);
-  const onSearch = useCallback((v: string) => {
-    if (debounceRef.current) {
-      window.clearTimeout(debounceRef.current);
-    }
-    debounceRef.current = window.setTimeout(() => {
-      setQuery(v);
-      debounceRef.current = null;
-    }, 260);
-  }, []);
-
-  const [resources] = useState<Resource[]>(() => [
-    { id: 1, title: 'Khan Academy: Precalculus', type: 'video', source: 'Khan Academy', duration: '3h', url: '#', difficulty: 'medium' },
-    { id: 2, title: 'MIT OpenCourseWare: Calculus', type: 'lecture', source: 'MIT OCW', duration: '10h', url: '#', difficulty: 'hard' },
-    { id: 3, title: 'Intro to Algebra', type: 'article', source: 'Example.edu', duration: '30m', url: '#', difficulty: 'easy' },
-  ]);
-
-  const filteredResources = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return resources;
-    return resources.filter(r => (r.title + ' ' + (r.source || '') + ' ' + (r.type || '')).toLowerCase().includes(q));
-  }, [query, resources]);
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const onSubmit = useCallback(async (e?: React.FormEvent) => {
+  const onSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim()) return;
 
@@ -125,13 +100,13 @@ export default function MathLearningApp() {
     } finally {
       setIsLoading(false);
     }
-  }, [input]);
+  };
 
-  const onHistorySelect = useCallback((text: string) => {
+  const onHistorySelect = (text: string) => {
     setInput(text);
     setView('chat');
     if (isMobile) setHistoryOpen(false);
-  }, [isMobile]);
+  };
 
   const topOffset = isMobile ? 56 : 0; // mobile AppBar height
 
@@ -154,25 +129,32 @@ export default function MathLearningApp() {
           <ToggleButton value="map" aria-label="map" sx={{ textTransform: 'none' }}>
             <MapIcon sx={{ mr: 1, color: 'primary.main' }} /> Map
           </ToggleButton>
+          <ToggleButton value="learn" aria-label="learn" sx={{ textTransform: 'none' }}>
+            <SchoolIcon sx={{ mr: 1, color: 'primary.main' }} /> Learn
+          </ToggleButton>
         </ToggleButtonGroup>
 
         <Box sx={{ px: 1, display: 'flex', alignItems: 'center' }}>
           <Typography variant="subtitle1" sx={{ mr: 1, color: 'text.primary' }}>
-            Learning Path
+            Profile
           </Typography>
-          <IconButton aria-label="toggle right panel" onClick={() => setRightPanelOpen(v => !v)} sx={{ color: 'primary.main' }}>
+          <IconButton aria-label="toggle profile panel" onClick={() => setRightPanelOpen(v => !v)} sx={{ color: 'primary.main' }}>
             {rightPanelOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
           </IconButton>
         </Box>
       </Box>
 
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <Box sx={{ flex: 1, minWidth: 320, borderRight: 1, borderColor: 'divider', bgcolor: 'background.paper', height: `calc(100vh - ${topOffset}px)` }}>
+        <Box sx={{ flex: 1, minWidth: 320, borderRight: 1, borderColor: 'divider', bgcolor: 'background.paper', height: `calc(100vh - ${topOffset}px)`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {view === 'chat' ? (
             <Chat messages={messages} input={input} setInput={setInput} onSubmit={onSubmit} isLoading={isLoading} onNewQuestion={function (): void {
               setMessages([]);
               setInput('');
             } } />
+          ) : view === 'learn' ? (
+            <LearnView
+              learningPathData={learningPathData}
+            />
           ) : (
             <Suspense fallback={<Box sx={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}><CircularProgress /></Box>}>
               <ConceptMap concepts={learningPathData?.concepts || []} />
@@ -184,32 +166,93 @@ export default function MathLearningApp() {
         {rightPanelOpen && (
           <Box sx={{ width: 360, borderLeft: 1, borderColor: 'divider', display: { xs: 'none', sm: 'block' }, p:1 }}>
             <Paper variant="outlined" sx={{ p: 2, height: `calc(100vh - ${topOffset}px)`, borderRadius: 2, overflow: 'auto' }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>Learning Path</Typography>
-              {learningPathData?.concepts && learningPathData.concepts.length > 0 ? (
-                <Box>
-                  {learningPathData.concepts.map((concept, index: number) => (
-                    <Box key={concept.id || index} sx={{ mb: 2, p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}>
-                      <Typography variant="subtitle1">{concept.name}</Typography>
-                      <Typography variant="body2" color="text.secondary">{concept.description}</Typography>
-                      {/* Add resources here if available */}
-                      {concept.resources && (
-                        <Box sx={{ mt: 1 }}>
-                          <Typography variant="caption">Resources:</Typography>
-                          {concept.resources.map((res, i) => (
-                            <Typography key={i} variant="body2">{(res as { title: string }).title}</Typography>
-                          ))}
-                        </Box>
-                      )}
-                    </Box>
-                  ))}
+              <Typography variant="h6" sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
+                👤 Student Profile
+              </Typography>
+
+              {/* Sign In Section */}
+              <Box sx={{ textAlign: 'center', mb: 4 }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'text.secondary' }}>
+                  Sign in to track your progress
+                </Typography>
+
+                <Button
+                  variant="contained"
+                  size="large"
+                  sx={{
+                    bgcolor: '#4285F4',
+                    color: 'white',
+                    px: 3,
+                    py: 1.5,
+                    borderRadius: 2,
+                    textTransform: 'none',
+                    fontSize: '1rem',
+                    fontWeight: 'medium',
+                    boxShadow: '0 2px 4px rgba(66, 133, 244, 0.3)',
+                    '&:hover': {
+                      bgcolor: '#3367D6',
+                      boxShadow: '0 4px 8px rgba(66, 133, 244, 0.4)',
+                    },
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                  onClick={() => {
+                    // TODO: Implement Google OAuth
+                    alert('Google Sign-In will be implemented soon!');
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src="https://developers.google.com/identity/images/g-logo.png"
+                    alt="Google"
+                    sx={{ width: 20, height: 20 }}
+                  />
+                  Sign in with Google
+                </Button>
+
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                  Access personalized learning paths and track your progress
+                </Typography>
+              </Box>
+
+              {/* Features Preview */}
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'medium' }}>
+                  ✨ What you'll get:
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ color: 'primary.main', fontSize: '1.2rem' }}>📊</Typography>
+                    <Typography variant="body2">Personalized progress tracking</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ color: 'primary.main', fontSize: '1.2rem' }}>🎯</Typography>
+                    <Typography variant="body2">Custom learning recommendations</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ color: 'primary.main', fontSize: '1.2rem' }}>💾</Typography>
+                    <Typography variant="body2">Save and revisit your answers</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ color: 'primary.main', fontSize: '1.2rem' }}>🏆</Typography>
+                    <Typography variant="body2">Achievement badges and milestones</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ color: 'primary.main', fontSize: '1.2rem' }}>📈</Typography>
+                    <Typography variant="body2">Detailed learning analytics</Typography>
+                  </Box>
                 </Box>
-              ) : (
-                <Typography color="text.secondary">No learning path available yet. Ask a question to generate one.</Typography>
-              )}
-              {/* Resources section */}
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="h6" sx={{ mb: 1 }}>Learning Resources</Typography>
-                <Resources resources={filteredResources} onSearch={onSearch} selectedConcept={null} />
+              </Box>
+
+              {/* Guest Mode Info */}
+              <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'medium' }}>
+                  Currently in Guest Mode
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Your progress is saved locally in this browser. Sign in to sync across devices and access advanced features.
+                </Typography>
               </Box>
             </Paper>
           </Box>
