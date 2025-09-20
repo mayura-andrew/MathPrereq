@@ -73,6 +73,7 @@ export default function MathLearningApp() {
   const profilePanel = (
     <Box sx={{
       width: rightPanelOpen ? { xs: '100%', sm: 360 } : 0,
+      display: rightPanelOpen ? 'block' : 'none',
       transition: 'width 200ms ease',
       overflow: 'hidden',
       flexShrink: 0
@@ -83,7 +84,7 @@ export default function MathLearningApp() {
 
   return (
     <ThemeProvider theme={appTheme}>
-      <Box sx={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <AppLayout
           sidebar={sidebar}
           sidebarOpen={historyOpen}

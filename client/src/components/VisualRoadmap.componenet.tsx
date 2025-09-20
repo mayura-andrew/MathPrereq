@@ -510,7 +510,7 @@ export default function VisualRoadmap({ learningPath }: { learningPath?: Learnin
         <svg
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
           viewBox="0 0 1000 700"
-          preserveAspectRatio="xMidYMid meet"
+          preserveAspectRatio="xMidYMid slice"
         >
           <defs>
             <filter id="glow">
