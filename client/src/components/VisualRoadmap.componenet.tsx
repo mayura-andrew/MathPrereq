@@ -23,6 +23,8 @@ const NeuralContainer = styled(Box)(({ theme }) => ({
   position: 'relative',
   width: '100%',
   height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
   overflow: 'hidden',
   background: theme.palette.background.default,
 }));
@@ -508,6 +510,7 @@ export default function VisualRoadmap({ learningPath }: { learningPath?: Learnin
         <svg
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
           viewBox="0 0 1000 700"
+          preserveAspectRatio="xMidYMid meet"
         >
           <defs>
             <filter id="glow">
