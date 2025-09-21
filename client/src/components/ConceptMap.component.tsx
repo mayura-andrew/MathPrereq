@@ -1,5 +1,5 @@
 import type { Concept, LearningPath } from '../types/api';
-import VisualRoadmap from './VisualRoadmap.componenet';
+import VisualRoadmap from './VisualRoadmap.component';
 
 export default function ConceptMap({ concepts }: { concepts: Concept[] }) {
   // Convert concepts to LearningPath format
