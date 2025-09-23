@@ -131,10 +131,10 @@ func LoadConfig() (*Config, error) {
 			Database: getEnvString("NEO4J_DATABASE", "neo4j"),
 		},
 		Weaviate: WeaviateConfig{
-			Host:      getEnvString("WEAVIATE_HOST", "98crrslth6p0jv5wzwiq.c0.asia-southeast1.gcp.weaviate.cloud"),
-			Scheme:    getEnvString("WEAVIATE_SCHEME", "https"),
-			APIKey:    getEnvString("WEAVIATE_API_KEY", "bTJHVTdjOUlaT0xRVXJ1QV9OZkJJRFo5T3N0a1VoaGFkeXJqOTZXK25yamZtS1ZUSnBELzFoRGJpaXNvPV92MjAw"),
-			ClassName: getEnvString("WEAVIATE_CLASS_NAME", "MathChunk"),
+			Host:      getEnvString("WEAVIATE_HOST", ""),
+			Scheme:    getEnvString("WEAVIATE_SCHEME", ""),
+			APIKey:    getEnvString("WEAVIATE_API_KEY", ""),
+			ClassName: getEnvString("WEAVIATE_CLASS_NAME", ""),
 			Headers:   make(map[string]string),
 		},
 		LLM: LLMConfig{
