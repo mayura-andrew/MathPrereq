@@ -17,12 +17,13 @@ type Server struct {
 func NewServer(router *gin.Engine, port string, logger *zap.Logger) *Server {
 	return &Server{
 		httpServer: &http.Server{
-			Addr:           ":" + port,
-			Handler:        router,
-			ReadTimeout:    5 * time.Minute, // Increased for long requests
-			WriteTimeout:   5 * time.Minute, // Increased for long responses
-			IdleTimeout:    2 * time.Minute,
-			MaxHeaderBytes: 1 << 20, // 1MB
+			Addr:              ":" + port,
+			Handler:           router,
+			ReadTimeout:       15 * time.Minute, // Increased for long requests
+			ReadHeaderTimeout: 10 * time.Second,
+			WriteTimeout:      60 * time.Minute, // Increased for long responses
+			IdleTimeout:       120 * time.Minute,
+			MaxHeaderBytes:    1 << 20, // 1MB
 		},
 		logger: logger,
 	}

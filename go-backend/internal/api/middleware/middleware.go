@@ -75,32 +75,48 @@ func Timeout(duration time.Duration) gin.HandlerFunc {
 
 		c.Request = c.Request.WithContext(ctx)
 
-		// Channel to capture if handler completed
-		finished := make(chan struct{})
+		// Use channel to track completion
+		done := make(chan struct{})
 
+		// Run handler in goroutine that signals completion
 		go func() {
-			defer close(finished)
+			defer func() {
+				if r := recover(); r != nil {
+					// Let recovery middleware handle panics
+					panic(r)
+				}
+				close(done)
+			}()
 			c.Next()
 		}()
 
 		select {
-		case <-finished:
-			// Handler completed successfully
+		case <-done:
+			// Handler completed
 			return
 		case <-ctx.Done():
-			// Timeout occurred
+			// Context cancelled (timeout or client disconnect)
 			if ctx.Err() == context.DeadlineExceeded {
 				c.AbortWithStatusJSON(http.StatusRequestTimeout, gin.H{
 					"success":    false,
-					"error":      "Request timeout",
+					"error":      "Request timeout - the operation took too long",
 					"request_id": c.GetString("request_id"),
 					"timeout":    duration.String(),
+					"message":    "Please try again or simplify your query",
+				})
+			} else if ctx.Err() == context.Canceled {
+				c.AbortWithStatusJSON(http.StatusRequestTimeout, gin.H{
+					"success":    false,
+					"error":      "Request cancelled",
+					"request_id": c.GetString("request_id"),
 				})
 			}
 			return
 		}
 	}
 }
+
+// ...existing code...
 
 // Recovery middleware with enhanced error reporting
 func Recovery(logger *zap.Logger) gin.HandlerFunc {

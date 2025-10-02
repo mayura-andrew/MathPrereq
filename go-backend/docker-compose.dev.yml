@@ -36,7 +36,7 @@ services:
       MLF_WEAVIATE_SCHEME: "http"
       MLF_LLM_API_KEY: ${GOOGLE_API_KEY:-}
       MLF_LLM_PROVIDER: "gemini"          
-      MLF_LLM_MODEL: "gemini-2.5-pro"
+      MLF_LLM_MODEL: "gemini-2.5-flash"
       MLF_LLM_MAX_TOKENS: 8192 
       MLF_LOGGING_LEVEL: "debug"
     ports:

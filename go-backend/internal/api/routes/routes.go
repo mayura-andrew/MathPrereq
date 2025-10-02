@@ -30,6 +30,7 @@ func SetupRoutes(
 	router.Use(middleware.Recovery(logger))
 	router.Use(middleware.CORS())
 	router.Use(middleware.SecurityHeaders())
+	router.Use(middleware.Timeout(50 * time.Second))
 
 	// Initialize handlers
 	handler := handlers.NewHandler(container, logger)
