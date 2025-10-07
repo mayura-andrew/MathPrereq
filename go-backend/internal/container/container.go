@@ -54,9 +54,10 @@ type AppContainer struct {
 	resourceScraper *scraper.EducationalWebScraper
 
 	// Repositories
-	conceptRepo repositories.ConceptRepository
-	queryRepo   repositories.QueryRepository
-	vectorRepo  repositories.VectorRepository
+	conceptRepo       repositories.ConceptRepository
+	queryRepo         repositories.QueryRepository
+	vectorRepo        repositories.VectorRepository
+	stagedConceptRepo repositories.StagedConceptRepository
 
 	// Services
 	queryService domainServices.QueryService
@@ -180,6 +181,7 @@ func (c *AppContainer) initializeRepositories() error {
 
 	// Import the actual repository implementations
 	var mongoRepo repositories.QueryRepository
+	var stagedConceptRepo repositories.StagedConceptRepository
 	if c.mongoClient != nil {
 		// Extract the raw mongo.Client from your wrapper
 		rawMongoClient := c.mongoClient.GetMongoClient()
@@ -190,6 +192,7 @@ func (c *AppContainer) initializeRepositories() error {
 				databaseName = "mathprereq" // default database name
 			}
 			mongoRepo = infrastructurerepos.NewMongoQueryRepository(rawMongoClient, databaseName, c.logger)
+			stagedConceptRepo = infrastructurerepos.NewMongoStagedConceptRepository(rawMongoClient, databaseName, c.logger)
 		} else {
 			c.logger.Warn("Raw MongoDB client is nil, using nil repository")
 		}
@@ -204,6 +207,7 @@ func (c *AppContainer) initializeRepositories() error {
 	c.conceptRepo = neo4jRepo
 	c.queryRepo = mongoRepo
 	c.vectorRepo = weaviateRepo
+	c.stagedConceptRepo = stagedConceptRepo
 
 	c.logger.Info("All repositories initialized successfully")
 	return nil
@@ -220,6 +224,7 @@ func (c *AppContainer) initializeServices() error {
 		c.conceptRepo,
 		c.queryRepo,
 		c.vectorRepo,
+		c.stagedConceptRepo,
 		llmAdapter,
 		nil, // scraper will be set after initialization
 		c.logger,
@@ -279,6 +284,7 @@ func (c *AppContainer) updateQueryServiceWithScraper() error {
 		c.conceptRepo,
 		c.queryRepo,
 		c.vectorRepo,
+		c.stagedConceptRepo,
 		llmAdapter,
 		c.resourceScraper,
 		c.logger,

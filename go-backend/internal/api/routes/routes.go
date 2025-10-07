@@ -34,6 +34,7 @@ func SetupRoutes(
 
 	// Initialize handlers
 	handler := handlers.NewHandler(container, logger)
+	adminHandler := handlers.NewAdminHandler(container.QueryService(), logger)
 
 	// Health checks (no timeout)
 	router.GET("/health", handler.HealthCheck)
@@ -84,6 +85,22 @@ func SetupRoutes(
 			resources.POST("/find-batch",
 				middleware.Timeout(120*time.Second), // Extended for batch operations
 				handler.FindResourcesForConcepts)
+		}
+
+		// Admin routes for concept staging
+		admin := v1.Group("/admin")
+		{
+			admin.GET("/staged-concepts/pending",
+				middleware.Timeout(30*time.Second),
+				adminHandler.GetPendingConcepts)
+
+			admin.GET("/staged-concepts/stats",
+				middleware.Timeout(15*time.Second),
+				adminHandler.GetStagedConceptStats)
+
+			admin.POST("/staged-concepts/:id/review",
+				middleware.Timeout(30*time.Second),
+				adminHandler.ReviewStagedConcept)
 		}
 
 		// Smart concept query - checks MongoDB first, then processes if needed

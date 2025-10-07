@@ -27,6 +27,12 @@ type QueryService interface {
 
 	// Debug and maintenance methods
 	GetCachedConcepts(ctx context.Context, limit int) ([]entities.Query, error)
+
+	GetPendingConcepts(ctx context.Context, limit, offset int) ([]*entities.StagedConcept, error)
+	GetStagedConceptStats(ctx context.Context) (*repositories.StagedConceptStats, error)
+	ApproveStagedConcept(ctx context.Context, stagedID string, reviewerID string, notes string) error
+	RejectStagedConcept(ctx context.Context, stagedID string, reviewerID string, notes string) error
+	MergeStagedConcept(ctx context.Context, stagedID string, existingConceptID string, reviewerID string, notes string) error
 }
 
 type ResourceService interface {

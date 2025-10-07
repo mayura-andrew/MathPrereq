@@ -371,6 +371,45 @@ func (c *Client) Close() error {
 	return c.driver.Close(context.Background())
 }
 
+func (c *Client) ExecuteQuery(ctx context.Context, query string, params map[string]interface{}) ([]map[string]interface{}, error) {
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+
+	result, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		records, err := tx.Run(ctx, query, params)
+		if err != nil {
+			return nil, err
+		}
+
+		var results []map[string]interface{}
+		for records.Next(ctx) {
+			record := records.Record()
+			recordMap := make(map[string]interface{})
+
+			for _, key := range record.Keys {
+				value, ok := record.Get(key)
+				if ok {
+					recordMap[key] = value
+				}
+			}
+
+			results = append(results, recordMap)
+		}
+
+		if err := records.Err(); err != nil {
+			return nil, err
+		}
+
+		return results, nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+
+	return result.([]map[string]interface{}), nil
+}
+
 func toString(value interface{}) string {
 	if value == nil {
 		return ""

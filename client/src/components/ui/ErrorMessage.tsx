@@ -1,22 +1,22 @@
-import Box from '@mui/material/Box';
-import Typography from '@mui/material/Typography';
-import Alert from '@mui/material/Alert';
-import AlertTitle from '@mui/material/AlertTitle';
-import Button from '@mui/material/Button';
-import RefreshIcon from '@mui/icons-material/Refresh';
+import Box from "@mui/material/Box";
+import Typography from "@mui/material/Typography";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
+import Button from "@mui/material/Button";
+import { RiRefreshLine } from "react-icons/ri";
 
 interface ErrorMessageProps {
   title?: string;
   message: string;
   onRetry?: () => void;
-  severity?: 'error' | 'warning' | 'info';
+  severity?: "error" | "warning" | "info";
 }
 
 export default function ErrorMessage({
-  title = 'Error',
+  title = "Error",
   message,
   onRetry,
-  severity = 'error'
+  severity = "error",
 }: ErrorMessageProps) {
   return (
     <Box p={2}>
@@ -27,7 +27,7 @@ export default function ErrorMessage({
             <Button
               color="inherit"
               size="small"
-              startIcon={<RefreshIcon />}
+              startIcon={<RiRefreshLine />}
               onClick={onRetry}
             >
               Retry

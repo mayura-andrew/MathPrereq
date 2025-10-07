@@ -1,13 +1,6 @@
-import { useState } from 'react';
-import { mathAPI } from '../services/api';
-
-interface APIResponse {
-  success: boolean;
-  message: string;
-  resources: APIResource[];
-  total_found: number;
-  request_id: string;
-}
+import { useState } from "react";
+import { mathAPI } from "../services/api";
+import type { EducationalResource } from "../types/api";
 
 interface APIResource {
   id: string;
@@ -31,11 +24,41 @@ interface APIResource {
   is_verified: boolean;
 }
 
+// Adapter: map API/EducationalResource to UI's APIResource shape (legacy component contract)
+function adaptResources(data: EducationalResource[] | unknown): APIResource[] {
+  if (!Array.isArray(data)) return [];
+  return (data as EducationalResource[]).map((r) => ({
+    id: r.id,
+    concept_id: (r.concept_ids && r.concept_ids[0]) || "",
+    concept_name: "",
+    title: r.title,
+    url: r.url,
+    description: r.description,
+    resource_type: r.resource_type,
+    source_domain: (r as any).platform || "other",
+    difficulty_level: r.difficulty_level,
+    quality_score: r.quality_score,
+    content_preview: (r as any).metadata?.content_preview || "",
+    scraped_at: r.scraped_at,
+    language: r.language,
+    duration: r.estimated_duration || "",
+    thumbnail_url: r.thumbnail_url || "",
+    view_count: r.view_count || 0,
+    author_channel: r.author || "",
+    tags: r.tags || [],
+    is_verified: false,
+  }));
+}
+
 export function useResources() {
   const [searchedResources, setSearchedResources] = useState<APIResource[]>([]);
   const [loadingResources, setLoadingResources] = useState(false);
-  const [conceptResources, setConceptResources] = useState<Record<string, APIResource[]>>({});
-  const [loadingConceptResources, setLoadingConceptResources] = useState<Record<string, boolean>>({});
+  const [conceptResources, setConceptResources] = useState<
+    Record<string, APIResource[]>
+  >({});
+  const [loadingConceptResources, setLoadingConceptResources] = useState<
+    Record<string, boolean>
+  >({});
 
   const searchResources = async (query: string) => {
     if (!query.trim()) return;
@@ -46,55 +69,56 @@ export function useResources() {
         limit: 10,
         minQuality: 70,
       });
-
-      // Handle different response formats
-      let apiData: unknown = response;
-      if (response && typeof response === 'object' && 'data' in response) {
-        apiData = response.data;
+      const resources = adaptResources(response);
+      // Fallback: try smartConceptQuery if empty
+      if (resources.length === 0) {
+        const alt = await mathAPI.smartConceptQuery(query.trim(), {
+          includeResources: true,
+          includeLearningPath: false,
+          maxResources: 10,
+        });
+        setSearchedResources(adaptResources(alt.educational_resources || []));
+      } else {
+        setSearchedResources(resources);
       }
-
-      let resources: APIResource[] = [];
-      if (Array.isArray(apiData)) {
-        resources = apiData as APIResource[];
-      } else if (apiData && typeof apiData === 'object' && 'resources' in apiData) {
-        resources = (apiData as APIResponse).resources || [];
-      }
-
-      setSearchedResources(resources);
     } catch (error) {
-      console.error('Failed to search resources:', error);
+      console.error("Failed to search resources:", error);
       setSearchedResources([]);
     } finally {
       setLoadingResources(false);
     }
   };
 
-  const fetchConceptResources = async (conceptId: string, conceptName: string) => {
-    setLoadingConceptResources(prev => ({ ...prev, [conceptId]: true }));
+  const fetchConceptResources = async (
+    conceptId: string,
+    conceptName: string
+  ) => {
+    setLoadingConceptResources((prev) => ({ ...prev, [conceptId]: true }));
     try {
       const response = await mathAPI.getResourcesForConcept(conceptName, {
         limit: 5,
         minQuality: 60,
       });
-
-      let apiData: unknown = response;
-      if (response && typeof response === 'object' && 'data' in response) {
-        apiData = response.data;
+      let resources = adaptResources(response);
+      // Fallback to smartConceptQuery if no results
+      if (resources.length === 0) {
+        const alt = await mathAPI.smartConceptQuery(conceptName, {
+          includeResources: true,
+          includeLearningPath: false,
+          maxResources: 5,
+        });
+        resources = adaptResources(alt.educational_resources || []);
       }
 
-      let resources: APIResource[] = [];
-      if (Array.isArray(apiData)) {
-        resources = apiData as APIResource[];
-      } else if (apiData && typeof apiData === 'object' && 'resources' in apiData) {
-        resources = (apiData as APIResponse).resources || [];
-      }
-
-      setConceptResources(prev => ({ ...prev, [conceptId]: resources }));
+      setConceptResources((prev) => ({ ...prev, [conceptId]: resources }));
     } catch (error) {
-      console.error(`Failed to fetch resources for concept ${conceptName}:`, error);
-      setConceptResources(prev => ({ ...prev, [conceptId]: [] }));
+      console.error(
+        `Failed to fetch resources for concept ${conceptName}:`,
+        error
+      );
+      setConceptResources((prev) => ({ ...prev, [conceptId]: [] }));
     } finally {
-      setLoadingConceptResources(prev => ({ ...prev, [conceptId]: false }));
+      setLoadingConceptResources((prev) => ({ ...prev, [conceptId]: false }));
     }
   };
 

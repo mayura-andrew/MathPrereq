@@ -29,6 +29,25 @@ func (a *LLMAdapter) GenerateExplanation(ctx context.Context, req ExplanationReq
 	return a.client.GenerateExplanation(ctx, llmReq)
 }
 
+func (a *LLMAdapter) AnalyzeNewConcept(ctx context.Context, conceptName string, queryContext string) (*NewConceptAnalysis, error) {
+	// Call the LLM client's AnalyzeNewConcept method
+	analysis, err := a.client.AnalyzeNewConcept(ctx, conceptName, queryContext)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert llm.NewConceptAnalysis to service.NewConceptAnalysis
+	return &NewConceptAnalysis{
+		ConceptName:         analysis.ConceptName,
+		Description:         analysis.Description,
+		SuggestedPrereqs:    analysis.SuggestedPrereqs,
+		SuggestedDifficulty: analysis.SuggestedDifficulty,
+		SuggestedCategory:   analysis.SuggestedCategory,
+		Reasoning:           analysis.Reasoning,
+		IsLikelyNewConcept:  analysis.IsLikelyNewConcept,
+	}, nil
+}
+
 func (a *LLMAdapter) Provider() string {
 	return a.client.Provider()
 }
