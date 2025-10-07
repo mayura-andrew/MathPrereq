@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -114,36 +113,41 @@ func (p *PDFProcessor) processPDF(filePath string) ([]weaviate.ContentChunk, err
 }
 
 func extractTextFromPDF(filePath string) (string, error) {
-	// Open the file first to get an io.ReaderAt
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Use pdf.Open with the file (which implements io.ReaderAt)
-	reader, _, err := pdf.Open(file)
+	// Open the PDF file using its file path
+	reader, f, err := pdf.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create PDF reader: %w", err)
 	}
 	defer reader.Close()
 
 	var textBuilder strings.Builder
-	totalPages := reader.NumPage()
+	totalPages := f.NumPage()
+
+	if totalPages == 0 {
+		return "", fmt.Errorf("PDF contains no pages")
+	}
 
 	log.Printf("Processing PDF with %d pages", totalPages)
 
+	// Get fonts from the PDF
+	fonts := make(map[string]*pdf.Font)
+
 	for pageNum := 1; pageNum <= totalPages; pageNum++ {
-		page := reader.Page(pageNum)
+		page := f.Page(pageNum)
 		if page.V.IsNull() {
 			log.Printf("Skipping empty page %d", pageNum)
 			continue
 		}
 
-		// Extract plain text
-		pageText, err := page.GetPlainText()
+		// Extract plain text with error handling
+		pageText, err := page.GetPlainText(fonts)
 		if err != nil {
 			log.Printf("Warning: Failed to extract text from page %d: %v", pageNum, err)
+			continue
+		}
+
+		if pageText == "" {
+			log.Printf("Page %d contains no extractable text", pageNum)
 			continue
 		}
 
@@ -157,6 +161,10 @@ func extractTextFromPDF(filePath string) (string, error) {
 	}
 
 	extractedText := textBuilder.String()
+	if extractedText == "" {
+		return "", fmt.Errorf("no text could be extracted from PDF")
+	}
+
 	log.Printf("Successfully extracted %d characters from %d pages", len(extractedText), totalPages)
 
 	return extractedText, nil
