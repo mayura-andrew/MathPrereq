@@ -8,8 +8,7 @@ A sophisticated **AI-powered learning platform** that helps students understand 
 
 ## 🎯 **Project Overview**
 
-MathPrereq analyzes mathematical questions, identifies prerequisite concepts, and provides structured learning paths with AI-generated explanations and web-scraped educational resources. The system features **smart caching** to reduce LLM costs and provide instant responses for previously analyzed concepts.
-
+MathPrereq analyzes mathematical questions, identifies prerequisite concepts, and provides structured learning paths with AI-generated explanations and web-scraped educational resources.
 ### **Key Features**
 
 - 🧠 **AI-Powered Analysis**: Uses LLM to analyze mathematical concepts and generate comprehensive explanations
