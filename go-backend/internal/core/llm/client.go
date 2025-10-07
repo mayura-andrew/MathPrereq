@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -35,6 +36,17 @@ type ExplanationRequest struct {
 	Query            string          `json:"query"`
 	PrerequisitePath []types.Concept `json:"prerequisite_path"`
 	ContextChunks    []string        `json:"context_chunks"`
+}
+
+// NewConceptAnalysis represents the analysis of a potentially new concept
+type NewConceptAnalysis struct {
+	ConceptName         string   `json:"concept_name"`
+	Description         string   `json:"description"`
+	SuggestedPrereqs    []string `json:"suggested_prerequisites"`
+	SuggestedDifficulty int      `json:"suggested_difficulty"`
+	SuggestedCategory   string   `json:"suggested_category"`
+	Reasoning           string   `json:"reasoning"`
+	IsLikelyNewConcept  bool     `json:"is_likely_new_concept"`
 }
 
 func NewClient(cfg config.LLMConfig) (*Client, error) {
@@ -300,6 +312,74 @@ func (c *Client) isResponseTruncated(response string) bool {
 	}
 
 	return false
+}
+
+const newConceptAnalysisPrompt = `You are an expert mathematics educator analyzing whether a concept should be added to a foundational mathematics knowledge graph.
+
+Given a concept name and the context in which it appeared, determine:
+1. Whether this is a legitimate mathematical concept worthy of inclusion
+2. Its prerequisites (what students must know first)
+3. Its difficulty level (1-10 scale)
+4. Its category (e.g., algebra, calculus, geometry, etc.)
+5. A clear description suitable for students
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "concept_name": "standardized name for the concept",
+  "description": "clear, educational description",
+  "suggested_prerequisites": ["prerequisite1", "prerequisite2"],
+  "suggested_difficulty": 5,
+  "suggested_category": "calculus",
+  "reasoning": "why this concept should/should not be added",
+  "is_likely_new_concept": true
+}
+
+Guidelines:
+- Set is_likely_new_concept to false if it's just a problem-solving technique, not a concept
+- Set is_likely_new_concept to false if it's too specific or not foundational
+- Set is_likely_new_concept to false if it's a variation of an existing concept
+- Difficulty: 1=basic arithmetic, 5=high school calculus, 10=advanced mathematics
+- Prerequisites should be fundamental concepts students MUST know first
+- Use standard mathematical terminology
+
+Concept to analyze: "%s"
+Context (from student's query): "%s"
+`
+
+func (c *Client) AnalyzeNewConcept(ctx context.Context, conceptName string, queryContext string) (*NewConceptAnalysis, error) {
+	c.logger.Info("Analyzing potential new concept",
+		zap.String("concept", conceptName),
+		zap.String("provider", c.config.Provider))
+
+	prompt := fmt.Sprintf(newConceptAnalysisPrompt, conceptName, queryContext)
+
+	response, err := c.callGemini(ctx, "", prompt, 0.1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze concept: %w", err)
+	}
+
+	var analysis NewConceptAnalysis
+
+	cleanedResponse := strings.TrimSpace(response)
+	cleanedResponse = strings.TrimPrefix(cleanedResponse, "```json")
+	cleanedResponse = strings.TrimPrefix(cleanedResponse, "```")
+	cleanedResponse = strings.TrimSuffix(cleanedResponse, "```")
+	cleanedResponse = strings.TrimSpace(cleanedResponse)
+
+	if err := json.Unmarshal([]byte(cleanedResponse), &analysis); err != nil {
+		c.logger.Error("Failed to parse concept analysis",
+			zap.Error(err),
+			zap.String("response", response))
+		return nil, fmt.Errorf("failed to parse concept analysis: %w", err)
+	}
+
+	c.logger.Info("Concept analysis completed",
+		zap.String("concept", conceptName),
+		zap.Bool("is_new_concept", analysis.IsLikelyNewConcept),
+		zap.Int("difficulty", analysis.SuggestedDifficulty),
+		zap.Strings("prerequisites", analysis.SuggestedPrereqs))
+
+	return &analysis, nil
 }
 
 // Close gracefully shuts down the client

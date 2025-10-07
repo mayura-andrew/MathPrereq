@@ -16,6 +16,9 @@ type ConceptRepository interface {
 	GetConceptDetail(ctx context.Context, conceptID string) (*types.ConceptDetailResult, error)
 	GetStats(ctx context.Context) (*types.SystemStats, error)
 	IsHealthy(ctx context.Context) bool
+	CreateConcept(ctx context.Context, concept *types.Concept) error
+	CreatePrerequisiteRelationship(ctx context.Context, conceptID, prerequisiteID string) error
+	ExistsByName(ctx context.Context, name string) (bool, error)
 }
 
 type QueryRepository interface {
@@ -42,6 +45,38 @@ type VectorRepository interface {
 	Search(ctx context.Context, query string, limit int) ([]types.VectorResult, error)
 	IsHealthy(ctx context.Context) bool
 	GetStats(ctx context.Context) (map[string]interface{}, error)
+}
+
+type StagedConceptRepository interface {
+	// Save saves a staged concept
+	Save(ctx context.Context, concept *entities.StagedConcept) error
+
+	// FindByID finds a staged concept by ID
+	FindByID(ctx context.Context, id string) (*entities.StagedConcept, error)
+
+	// FindByConceptName finds a staged concept by name
+	FindByConceptName(ctx context.Context, conceptName string) (*entities.StagedConcept, error)
+
+	// GetPending gets all pending staged concepts
+	GetPending(ctx context.Context, limit, offset int) ([]*entities.StagedConcept, error)
+
+	// GetByStatus gets staged concepts by status
+	GetByStatus(ctx context.Context, status entities.StagedConceptStatus, limit, offset int) ([]*entities.StagedConcept, error)
+
+	// Update updates a staged concept
+	Update(ctx context.Context, concept *entities.StagedConcept) error
+
+	// GetStats gets statistics about staged concepts
+	GetStats(ctx context.Context) (*StagedConceptStats, error)
+}
+
+type StagedConceptStats struct {
+	TotalCount        int64                   `json:"total_count"`
+	PendingCount      int64                   `json:"pending_count"`
+	ApprovedCount     int64                   `json:"approved_count"`
+	RejectedCount     int64                   `json:"rejected_count"`
+	MergedCount       int64                   `json:"merged_count"`
+	MostRecentPending *entities.StagedConcept `json:"most_recent_pending,omitempty"`
 }
 
 // Supporting types

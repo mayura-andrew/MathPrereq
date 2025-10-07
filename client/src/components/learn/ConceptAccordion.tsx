@@ -1,17 +1,15 @@
-import { useState } from 'react';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import Typography from '@mui/material/Typography';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
-import CircularProgress from '@mui/material/CircularProgress';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import StarIcon from '@mui/icons-material/Star';
-import SchoolIcon from '@mui/icons-material/School';
-import type { Concept } from '../../types/api';
-import { ResourceCard } from '../ui';
+import { useState } from "react";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
+import { RiArrowDownSLine, RiStarLine, RiSchoolLine } from "react-icons/ri";
+import type { Concept } from "../../types/api";
+import { ResourceCard } from "../ui";
 
 interface APIResource {
   id: string;
@@ -50,7 +48,7 @@ export default function ConceptAccordion({
   loadingResources,
   completed,
   onToggleComplete,
-  onFetchResources
+  onFetchResources,
 }: ConceptAccordionProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -63,44 +61,52 @@ export default function ConceptAccordion({
 
   return (
     <Accordion expanded={expanded} onChange={handleExpand}>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
-          <SchoolIcon color="primary" />
+      <AccordionSummary expandIcon={<RiArrowDownSLine />}>
+        <Box
+          sx={{ display: "flex", alignItems: "center", gap: 2, width: "100%" }}
+        >
+          <RiSchoolLine color="#1976d2" />
           <Box sx={{ flex: 1 }}>
             <Typography variant="h6">{concept.name}</Typography>
             <Typography variant="body2" color="text.secondary">
               {concept.description}
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <Chip
-              label={concept.difficulty_level || 'intermediate'}
+              label={concept.difficulty_level || "intermediate"}
               size="small"
-              color={completed ? 'success' : 'default'}
-              variant={completed ? 'filled' : 'outlined'}
+              color={completed ? "success" : "default"}
+              variant={completed ? "filled" : "outlined"}
             />
-            {completed && <StarIcon color="warning" />}
+            {completed && <RiStarLine color="#ed6c02" />}
           </Box>
         </Box>
       </AccordionSummary>
       <AccordionDetails>
         <Box sx={{ mb: 2 }}>
           <Button
-            variant={completed ? 'outlined' : 'contained'}
-            color={completed ? 'success' : 'primary'}
+            variant={completed ? "outlined" : "contained"}
+            color={completed ? "success" : "primary"}
             onClick={() => onToggleComplete(concept.id)}
             sx={{ mr: 1 }}
           >
-            {completed ? 'Mark Incomplete' : 'Mark Complete'}
+            {completed ? "Mark Incomplete" : "Mark Complete"}
           </Button>
         </Box>
 
         {loadingResources ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+          <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
             <CircularProgress />
           </Box>
         ) : resources.length > 0 ? (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 2 }}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+              gap: 2,
+            }}
+          >
             {resources.map((resource) => (
               <ResourceCard key={resource.id} resource={resource} />
             ))}

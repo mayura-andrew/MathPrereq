@@ -4,7 +4,6 @@ logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
@@ -31,4 +30,4 @@ dist-ssr
 .env.*.local
 .DS_Store
 npm-debug.log
-pnpm-lock.yaml
+package-lock.json

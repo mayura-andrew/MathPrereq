@@ -15,18 +15,30 @@ import (
 )
 
 type queryService struct {
-	conceptRepo     repositories.ConceptRepository
-	queryRepo       repositories.QueryRepository
-	vectorRepo      repositories.VectorRepository
-	llmClient       LLMClient
-	resourceScraper *scraper.EducationalWebScraper
-	logger          *zap.Logger
+	conceptRepo       repositories.ConceptRepository
+	queryRepo         repositories.QueryRepository
+	vectorRepo        repositories.VectorRepository
+	stagedConceptRepo repositories.StagedConceptRepository
+	llmClient         LLMClient
+	resourceScraper   *scraper.EducationalWebScraper
+	logger            *zap.Logger
+}
+
+type NewConceptAnalysis struct {
+	ConceptName         string   `json:"concept_name"`
+	Description         string   `json:"description"`
+	SuggestedPrereqs    []string `json:"suggested_prerequisites"`
+	SuggestedDifficulty int      `json:"suggested_difficulty"`
+	SuggestedCategory   string   `json:"suggested_category"`
+	Reasoning           string   `json:"reasoning"`
+	IsLikelyNewConcept  bool     `json:"is_likely_new_concept"`
 }
 
 // LLMClient interface for the service layer
 type LLMClient interface {
 	IdentifyConcepts(ctx context.Context, query string) ([]string, error)
 	GenerateExplanation(ctx context.Context, req ExplanationRequest) (string, error)
+	AnalyzeNewConcept(ctx context.Context, conceptName string, queryContext string) (*NewConceptAnalysis, error)
 	Provider() string
 	Model() string
 	IsHealthy(ctx context.Context) bool
@@ -42,17 +54,19 @@ func NewQueryService(
 	conceptRepo repositories.ConceptRepository,
 	queryRepo repositories.QueryRepository,
 	vectorRepo repositories.VectorRepository,
+	stagedConceptRepo repositories.StagedConceptRepository,
 	llmClient LLMClient,
 	resourceScraper *scraper.EducationalWebScraper,
 	logger *zap.Logger,
 ) services.QueryService {
 	return &queryService{
-		conceptRepo:     conceptRepo,
-		queryRepo:       queryRepo,
-		vectorRepo:      vectorRepo,
-		llmClient:       llmClient,
-		resourceScraper: resourceScraper,
-		logger:          logger,
+		conceptRepo:       conceptRepo,
+		queryRepo:         queryRepo,
+		vectorRepo:        vectorRepo,
+		stagedConceptRepo: stagedConceptRepo,
+		llmClient:         llmClient,
+		resourceScraper:   resourceScraper,
+		logger:            logger,
 	}
 }
 
@@ -102,6 +116,10 @@ func (s *queryService) processQueryPipeline(ctx context.Context, query *entities
 
 	query.IdentifiedConcepts = conceptNames
 	result.IdentifiedConcepts = conceptNames
+
+	// Step : Check for new concepts not in the knowledge graph (non-blocking)
+	// Use a background context so this can complete even if the request is cancelled
+	go s.detectAndStageNewConcepts(context.Background(), conceptNames, query)
 
 	// Step 2: Find prerequisite path
 	stepStart = time.Now()
@@ -159,6 +177,7 @@ func (s *queryService) processQueryPipeline(ctx context.Context, query *entities
 
 func (s *queryService) saveQueryAsync(ctx context.Context, query *entities.Query) {
 	go func() {
+		// Use a new context for the async operation
 		saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -447,7 +466,263 @@ func (s *queryService) removeDuplicateStrings(input []string) []string {
 	return result
 }
 
-// Implement remaining service methods
+func (s *queryService) detectAndStageNewConcepts(ctx context.Context, conceptNames []string, query *entities.Query) {
+	if s.stagedConceptRepo == nil {
+		s.logger.Warn("StagedConceptRepository is not configured, skipping new concept detection.")
+		return
+	}
+
+	s.logger.Info("Checking for new concepts to stage",
+		zap.String("query_id", query.ID),
+		zap.Strings("concepts", conceptNames))
+
+	bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	for _, conceptName := range conceptNames {
+		// Normalize concept name to avoid duplicates with different casing/spacing
+		normalizedConceptName := strings.TrimSpace(strings.ToLower(conceptName))
+		if normalizedConceptName == "" {
+			continue
+		}
+
+		exists, err := s.conceptRepo.ExistsByName(bgCtx, normalizedConceptName)
+		if err != nil {
+			s.logger.Warn("Failed to check concept existence",
+				zap.String("concept", normalizedConceptName),
+				zap.Error(err))
+			continue
+		}
+
+		if exists {
+			s.logger.Debug("Concept already exists in KG",
+				zap.String("concept", normalizedConceptName))
+			continue
+		}
+
+		existing, err := s.stagedConceptRepo.FindByConceptName(bgCtx, normalizedConceptName)
+		if err != nil {
+			s.logger.Warn("Failed to check staged concept",
+				zap.String("concept", normalizedConceptName),
+				zap.Error(err))
+			continue
+		}
+
+		if existing != nil {
+			// Update occurrence count
+			existing.IncrementOccurrence(query.ID)
+			if err := s.stagedConceptRepo.Update(bgCtx, existing); err != nil {
+				s.logger.Warn("Failed to update staged concept occurrence",
+					zap.String("concept", normalizedConceptName),
+					zap.Error(err))
+			}
+			s.logger.Info("Incremented occurrence for existing staged concept",
+				zap.String("concept", normalizedConceptName),
+				zap.Int("new_count", existing.OccurrenceCount))
+			continue
+		}
+
+		// New concept detected - analyze it with LLM
+		s.logger.Info("New concept detected, analyzing",
+			zap.String("concept", conceptName))
+
+		analysis, err := s.llmClient.AnalyzeNewConcept(bgCtx, conceptName, query.Text)
+		if err != nil {
+			s.logger.Warn("Failed to analyze new concept",
+				zap.String("concept", conceptName),
+				zap.Error(err))
+			continue
+		}
+
+		if !analysis.IsLikelyNewConcept {
+			s.logger.Info("LLM determined this is not a new mathematical concept",
+				zap.String("concept", conceptName),
+				zap.String("reasoning", analysis.Reasoning))
+			continue
+		}
+
+		// Create staged concept using the original name, but check was done on normalized
+		staged := entities.NewStagedConcept(
+			conceptName,
+			analysis.Description,
+			query.ID,
+			query.Text,
+			query.UserID,
+			analysis.SuggestedPrereqs,
+			analysis.SuggestedDifficulty,
+			analysis.SuggestedCategory,
+			analysis.Reasoning,
+		)
+
+		if err := s.stagedConceptRepo.Save(bgCtx, staged); err != nil {
+			s.logger.Error("Failed to save staged concept",
+				zap.String("concept", conceptName),
+				zap.Error(err))
+			continue
+		}
+
+		s.logger.Info("New concept staged for review",
+			zap.String("concept", conceptName),
+			zap.String("staged_id", staged.ID),
+			zap.Int("difficulty", analysis.SuggestedDifficulty),
+			zap.Strings("prerequisites", analysis.SuggestedPrereqs))
+	}
+}
+
+func (s *queryService) GetPendingConcepts(ctx context.Context, limit, offset int) ([]*entities.StagedConcept, error) {
+	return s.stagedConceptRepo.GetPending(ctx, limit, offset)
+}
+
+func (s *queryService) ApproveStagedConcept(ctx context.Context, stagedID string, reviewerID string, notes string) error {
+	staged, err := s.stagedConceptRepo.FindByID(ctx, stagedID)
+	if err != nil {
+		return fmt.Errorf("failed to find staged concept: %w", err)
+	}
+	if staged == nil {
+		return fmt.Errorf("staged concept not found")
+	}
+
+	if staged.Status != entities.StagedConceptStatusPending {
+		return fmt.Errorf("concept has already been reviewed")
+	}
+
+	// Normalize concept ID for consistency
+	conceptID := s.generateConceptID(staged.ConceptName)
+
+	newConcept := types.Concept{
+		ID:            conceptID,
+		Name:          staged.ConceptName,
+		Prerequisites: staged.SuggestedPrerequisites,
+		Difficulty:    staged.SuggestedDifficulty,
+		Category:      staged.SuggestedCategory,
+		Description:   staged.Description,
+	}
+
+	// Create concept in Neo4j knowledge graph
+	if err := s.conceptRepo.CreateConcept(ctx, &newConcept); err != nil {
+		return fmt.Errorf("failed to create concept in KG: %w", err)
+	}
+
+	// Create prerequisite relationships in Neo4j
+	if len(staged.SuggestedPrerequisites) > 0 {
+		s.logger.Info("Creating prerequisite relationships",
+			zap.String("concept", newConcept.Name),
+			zap.Strings("prerequisites", staged.SuggestedPrerequisites))
+
+		for _, prereqName := range staged.SuggestedPrerequisites {
+			// Normalize prerequisite ID
+			prereqID := s.generateConceptID(prereqName)
+
+			// Check if prerequisite exists in KG
+			prereqExists, err := s.conceptRepo.ExistsByName(ctx, prereqName)
+			if err != nil {
+				s.logger.Warn("Failed to check prerequisite existence",
+					zap.String("prerequisite", prereqName),
+					zap.Error(err))
+				continue
+			}
+
+			if !prereqExists {
+				s.logger.Warn("Prerequisite concept not found in KG, skipping relationship",
+					zap.String("concept", newConcept.Name),
+					zap.String("prerequisite", prereqName))
+				continue
+			}
+
+			// Create REQUIRES relationship in Neo4j
+			if err := s.conceptRepo.CreatePrerequisiteRelationship(ctx, conceptID, prereqID); err != nil {
+				s.logger.Error("Failed to create prerequisite relationship",
+					zap.String("concept", newConcept.Name),
+					zap.String("prerequisite", prereqName),
+					zap.Error(err))
+				// Continue with other relationships even if one fails
+			} else {
+				s.logger.Info("Prerequisite relationship created",
+					zap.String("concept", newConcept.Name),
+					zap.String("prerequisite", prereqName))
+			}
+		}
+	}
+
+	// Update staged concept status
+	staged.Approve(reviewerID, notes, newConcept.ID)
+	if err := s.stagedConceptRepo.Update(ctx, staged); err != nil {
+		// Log error but don't fail - concept is already in KG
+		s.logger.Error("Failed to update staged concept status (concept already added to KG)",
+			zap.String("staged_id", staged.ID),
+			zap.Error(err))
+	}
+
+	s.logger.Info("Staged concept approved and added to KG",
+		zap.String("concept_name", staged.ConceptName),
+		zap.String("concept_id", newConcept.ID),
+		zap.String("reviewer", reviewerID),
+		zap.Int("prerequisite_count", len(staged.SuggestedPrerequisites)))
+
+	return nil
+}
+
+func (s *queryService) RejectStagedConcept(ctx context.Context, stagedID string, reviewerID string, notes string) error {
+	staged, err := s.stagedConceptRepo.FindByID(ctx, stagedID)
+	if err != nil {
+		return fmt.Errorf("failed to find staged concept: %w", err)
+	}
+	if staged == nil {
+		return fmt.Errorf("staged concept not found")
+	}
+
+	if staged.Status != entities.StagedConceptStatusPending {
+		return fmt.Errorf("concept has already been reviewed")
+	}
+
+	staged.Reject(reviewerID, notes)
+	if err := s.stagedConceptRepo.Update(ctx, staged); err != nil {
+		return fmt.Errorf("failed to update staged concept: %w", err)
+	}
+
+	s.logger.Info("Staged concept rejected",
+		zap.String("concept_name", staged.ConceptName),
+		zap.String("reviewer", reviewerID))
+
+	return nil
+}
+
+func (s *queryService) MergeStagedConcept(ctx context.Context, stagedID string, existingConceptID string, reviewerID string, notes string) error {
+	staged, err := s.stagedConceptRepo.FindByID(ctx, stagedID)
+	if err != nil {
+		return fmt.Errorf("failed to find staged concept: %w", err)
+	}
+	if staged == nil {
+		return fmt.Errorf("staged concept not found")
+	}
+
+	if staged.Status != entities.StagedConceptStatusPending {
+		return fmt.Errorf("concept has already been reviewed")
+	}
+
+	// Verify existing concept exists
+	existingConcept, err := s.conceptRepo.GetConceptDetail(ctx, existingConceptID)
+	if err != nil || existingConcept == nil {
+		return fmt.Errorf("existing concept not found")
+	}
+
+	staged.Merge(reviewerID, notes, existingConceptID)
+	if err := s.stagedConceptRepo.Update(ctx, staged); err != nil {
+		return fmt.Errorf("failed to update staged concept: %w", err)
+	}
+
+	s.logger.Info("Staged concept merged with existing",
+		zap.String("staged_concept", staged.ConceptName),
+		zap.String("existing_concept", existingConcept.Concept.Name),
+		zap.String("reviewer", reviewerID))
+
+	return nil
+}
+
+func (s *queryService) GetStagedConceptStats(ctx context.Context) (*repositories.StagedConceptStats, error) {
+	return s.stagedConceptRepo.GetStats(ctx)
+}
+
 func (s *queryService) GetConceptDetail(ctx context.Context, conceptID string) (*types.ConceptDetailResult, error) {
 	return s.conceptRepo.GetConceptDetail(ctx, conceptID)
 }
