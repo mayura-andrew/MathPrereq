@@ -185,17 +185,6 @@ export default function TextualExplanation({ response }: { response: QueryRespon
         </Box>
       )}
 
-      {/* Processed Explanation */}
-      {response.explanation && (
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            Processed Explanation
-          </Typography>
-          <Paper sx={{ p: 2, bgcolor: 'grey.50', overflow: 'visible' }}>
-            {processMathText(response.explanation).map(renderProcessedLine)}
-          </Paper>
-        </Box>
-      )}
 
       {/* Identified Concepts */}
       {response.identified_concepts && response.identified_concepts.length > 0 && (

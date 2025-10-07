@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
@@ -16,7 +16,23 @@ import SearchIcon from '@mui/icons-material/Search';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import StarIcon from '@mui/icons-material/Star';
-import type { Concept, LearningPath, } from '../types/api';
+
+import ReactFlow, {
+  Node,
+  Edge,
+  addEdge,
+  Connection,
+  useNodesState,
+  useEdgesState,
+  Controls,
+  MiniMap,
+  Background,
+  BackgroundVariant,
+  Panel,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+
+import type { Concept, LearningPath } from '../types/api';
 import { mathAPI } from '../services/api';
 
 const NeuralContainer = styled(Box)(({ theme }) => ({
@@ -28,49 +44,6 @@ const NeuralContainer = styled(Box)(({ theme }) => ({
   overflow: 'hidden',
   background: theme.palette.background.default,
 }));
-
-const NeuralCanvas = styled(Box)({
-  position: 'relative',
-  width: '100%',
-  height: '100%',
-  cursor: 'grab',
-  background: 'radial-gradient(circle at center, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%)',
-  borderRadius: 12,
-  boxShadow: 'inset 0 0 60px rgba(0,0,0,0.05), 0 4px 20px rgba(0,0,0,0.08)',
-});
-
-const NeuralNode = styled(Paper)<{ size: number; isActive: boolean; difficulty: string; isCenter: boolean }>(
-  ({ theme, size, isActive, difficulty, isCenter }) => ({
-    position: 'absolute',
-    width: size,
-    height: size,
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    border: isCenter ? `4px solid ${getDifficultyColor(difficulty)}` : `2px solid ${getDifficultyColor(difficulty)}`,
-    backgroundColor: isActive ? getDifficultyColor(difficulty) : 
-      isCenter ? theme.palette.background.paper : 'rgba(255,255,255,0.9)',
-    color: isActive ? theme.palette.common.white : theme.palette.text.primary,
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    boxShadow: isActive 
-      ? `0 0 30px ${getDifficultyColor(difficulty)}50, 0 8px 16px rgba(0,0,0,0.2)` 
-      : isCenter 
-        ? '0 4px 12px rgba(0,0,0,0.15)' 
-        : '0 2px 8px rgba(0,0,0,0.1)',
-    '&:hover': {
-      transform: 'scale(1.1)',
-      boxShadow: `0 0 25px ${getDifficultyColor(difficulty)}60, 0 6px 12px rgba(0,0,0,0.3)`,
-      zIndex: 10,
-    },
-    '&.dragging': {
-      cursor: 'grabbing',
-      zIndex: 1000,
-      transform: 'scale(1.05)',
-    },
-  })
-);
 
 const SidePanel = styled(Paper)(({ theme }) => ({
   position: 'absolute',
@@ -93,43 +66,66 @@ function getDifficultyColor(difficulty: string) {
   }
 }
 
-interface APIResource {
-  id: string;
-  concept_id: string;
-  concept_name: string;
-  title: string;
-  url: string;
-  description: string;
-  resource_type: string;
-  source_domain: string;
-  difficulty_level: string;
-  quality_score: number;
-  content_preview: string;
-  scraped_at: string;
-  language: string;
-  duration: string;
-  thumbnail_url: string;
-  view_count: number;
-  author_channel: string;
-  tags: string[] | null;
-  is_verified: boolean;
-}
+// Custom Node Component
+const CustomNode = ({ data }: { data: any }) => {
+  const { node, onNodeClick, completedConcepts, toggleComplete } = data;
+  const isCompleted = completedConcepts.has(node.id);
 
-interface APIResponse {
-  success: boolean;
-  message: string;
-  resources: APIResource[];
-  total_found: number;
-  request_id: string;
-}
+  return (
+    <Paper
+      sx={{
+        p: 2,
+        borderRadius: 2,
+        border: `2px solid ${getDifficultyColor(node.difficulty)}`,
+        backgroundColor: isCompleted ? getDifficultyColor(node.difficulty) : 'background.paper',
+        color: isCompleted ? 'common.white' : 'text.primary',
+        cursor: 'pointer',
+        minWidth: 120,
+        textAlign: 'center',
+        boxShadow: isCompleted ? '0 0 20px rgba(59, 130, 246, 0.5)' : '0 2px 8px rgba(0,0,0,0.1)',
+        transition: 'all 0.3s ease',
+        '&:hover': {
+          transform: 'scale(1.05)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        },
+      }}
+      onClick={() => onNodeClick(node)}
+    >
+      <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>
+        {node.name}
+      </Typography>
+      <Typography variant="caption" sx={{ opacity: 0.8 }}>
+        {node.difficulty}
+      </Typography>
+      {node.isCenter && (
+        <Typography variant="caption" sx={{ display: 'block', mt: 1, fontSize: '0.7rem' }}>
+          🎯 Main Concept
+        </Typography>
+      )}
+      <Button
+        size="small"
+        variant={isCompleted ? 'contained' : 'outlined'}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleComplete(node.id);
+        }}
+        sx={{ mt: 1, fontSize: '0.7rem' }}
+      >
+        {isCompleted ? 'Mastered' : 'Mark Complete'}
+      </Button>
+    </Paper>
+  );
+};
 
-type Node = {
+const nodeTypes = {
+  custom: CustomNode,
+};
+
+type NodeData = {
   id: number;
   name: string;
   description: string;
   difficulty: string;
-  x: number;
-  y: number;
   connections: { targetId: number; strength: number; distance: number }[];
   size: number;
   pulseDelay: number;
@@ -137,27 +133,17 @@ type Node = {
   type: 'prerequisite' | 'target';
 };
 
-type ConceptDetails = {
-  concept_name: string;
-  difficulty: string;
-  description: string;
-  explanation?: string;
-  prerequisites?: Concept[];
-  examples?: string[];
-  error?: string;
-};
-
 export default function VisualRoadmap({ learningPath }: { learningPath?: LearningPath }) {
-  const [selectedConcept, setSelectedConcept] = useState<Node | null>(null);
+  const [selectedConcept, setSelectedConcept] = useState<NodeData | null>(null);
   const [completedConcepts, setCompletedConcepts] = useState<Set<number>>(new Set());
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [draggedNode, setDraggedNode] = useState<number | null>(null);
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
   const [loadingConcept, setLoadingConcept] = useState(false);
-  const [conceptDetails, setConceptDetails] = useState<ConceptDetails | null>(null);
-  const [conceptResources, setConceptResources] = useState<Record<string, APIResource[]>>({});
+  const [conceptDetails, setConceptDetails] = useState<any>(null);
+  const [conceptResources, setConceptResources] = useState<Record<string, any[]>>({});
   const [loadingResources, setLoadingResources] = useState<Record<string, boolean>>({});
-  const canvasRef = useRef<HTMLDivElement>(null);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
   const processLearningPath = (data: LearningPath | undefined): Node[] => {
     if (!data || !data.concepts) return [];
@@ -345,47 +331,52 @@ export default function VisualRoadmap({ learningPath }: { learningPath?: Learnin
     return nodeList.map((n, idx) => ({ ...n, connections: connectionsByNode[idx] }));
   };
 
-  useEffect(() => {
-    const processedNodes = processLearningPath(learningPath);
-    const nodesWithConnections = calculateConnections(processedNodes, learningPath);
-    setNodes(nodesWithConnections);
-  }, [learningPath]);
+  const processLearningPathToFlow = (data: LearningPath | undefined): { nodes: Node[], edges: Edge[] } => {
+    if (!data || !data.concepts) return { nodes: [], edges: [] };
 
-  const handleMouseDown = (e: React.MouseEvent, nodeId: number) => {
-    e.preventDefault();
-    setDraggedNode(nodeId);
+    const processedNodes = processLearningPath(data);
+    const nodesWithConnections = calculateConnections(processedNodes, data);
+
+    const flowNodes: Node[] = nodesWithConnections.map((node) => ({
+      id: node.id.toString(),
+      type: 'custom',
+      position: { x: node.x, y: node.y },
+      data: {
+        node,
+        onNodeClick: handleConceptClick,
+        completedConcepts,
+        toggleComplete,
+      },
+      draggable: true,
+    }));
+
+    const flowEdges: Edge[] = [];
+    nodesWithConnections.forEach((node) => {
+      node.connections.forEach((conn) => {
+        flowEdges.push({
+          id: `${node.id}-${conn.targetId}`,
+          source: node.id.toString(),
+          target: conn.targetId.toString(),
+          type: 'smoothstep',
+          animated: completedConcepts.has(node.id) || completedConcepts.has(conn.targetId),
+          style: {
+            stroke: completedConcepts.has(node.id) || completedConcepts.has(conn.targetId) ? '#3b82f6' : '#cbd5e1',
+            strokeWidth: node.isCenter || nodesWithConnections[conn.targetId]?.isCenter ? 3 : 2,
+          },
+        });
+      });
+    });
+
+    return { nodes: flowNodes, edges: flowEdges };
   };
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (draggedNode !== null && canvasRef.current) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-
-      setNodes(prev => {
-        const updated = prev.map(node =>
-          node.id === draggedNode ? { ...node, x, y } : node
-        );
-        return calculateConnections(updated, learningPath);
-      });
-    }
-  }, [draggedNode, learningPath]);
-
-  const handleMouseUp = useCallback(() => {
-    setDraggedNode(null);
-  }, []);
-
   useEffect(() => {
-    if (draggedNode !== null) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    }
+    const { nodes: flowNodes, edges: flowEdges } = processLearningPathToFlow(learningPath);
+    setNodes(flowNodes);
+    setEdges(flowEdges);
+  }, [learningPath, completedConcepts]);
 
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [draggedNode, handleMouseMove, handleMouseUp]);
+  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
   const toggleComplete = (conceptId: number) => {
     const newCompleted = new Set(completedConcepts);
@@ -506,129 +497,41 @@ export default function VisualRoadmap({ learningPath }: { learningPath?: Learnin
         </Box>
       </Box>
 
-      <NeuralCanvas ref={canvasRef}>
-        <svg
-          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-          viewBox="0 0 1000 700"
-          preserveAspectRatio="xMidYMid slice"
+      <Box sx={{ flex: 1, position: 'relative' }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          nodeTypes={nodeTypes}
+          fitView
+          attributionPosition="bottom-left"
         >
-          <defs>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="4" result="coloredBlur" />
-              <feMerge>
-                <feMergeNode in="coloredBlur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
-              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.6" />
-              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.3" />
-            </linearGradient>
-          </defs>
-
-          {nodes.map((node) =>
-            node.connections.map((connection) => {
-              const targetNode = nodes.find(n => n.id === connection.targetId);
-              if (!targetNode) return null;
-
-              const isActive = completedConcepts.has(node.id) || completedConcepts.has(targetNode.id);
-              const isCenterConnection = node.isCenter || targetNode.isCenter;
-
-              return (
-                <g key={`${node.id}-${connection.targetId}`}>
-                  <path
-                    d={`M ${node.x} ${node.y} Q ${(node.x + targetNode.x) / 2} ${(node.y + targetNode.y) / 2 - 30} ${targetNode.x} ${targetNode.y}`}
-                    stroke={isActive ? '#3b82f6' : '#cbd5e1'}
-                    strokeWidth={isCenterConnection ? connection.strength * 3 : connection.strength * 2}
-                    fill="none"
-                    opacity={isActive ? connection.strength * 0.9 : connection.strength * 0.4}
-                    filter={isActive ? "url(#glow)" : "none"}
-                    strokeDasharray={isCenterConnection ? "none" : "5,5"}
-                  />
-                  {isActive && (
-                    <circle
-                      cx={(node.x + targetNode.x) / 2}
-                      cy={(node.y + targetNode.y) / 2 - 30}
-                      r="3"
-                      fill="#3b82f6"
-                      opacity="0.8"
-                    >
-                      <animate
-                        attributeName="opacity"
-                        values="0.3;1;0.3"
-                        dur="2s"
-                        repeatCount="indefinite"
-                      />
-                    </circle>
-                  )}
-                </g>
-              );
-            })
-          )}
-        </svg>
-
-        {nodes.map((node) => (
-          <NeuralNode
-            key={node.id}
-            size={node.size}
-            isActive={completedConcepts.has(node.id)}
-            difficulty={node.difficulty}
-            isCenter={node.isCenter}
-            sx={{
-              left: node.x - node.size / 2,
-              top: node.y - node.size / 2,
-              ...(draggedNode === node.id && { zIndex: 1000 }),
-            }}
-            onMouseDown={(e) => handleMouseDown(e, node.id)}
-            onClick={() => handleConceptClick(node)}
-            className={draggedNode === node.id ? 'dragging' : ''}
-          >
-            <Box sx={{ textAlign: 'center', px: 1 }}>
-              <Typography 
-                variant="caption" 
-                sx={{ 
-                  fontSize: node.isCenter ? '0.75rem' : '0.65rem', 
-                  fontWeight: node.isCenter ? 'bold' : 'medium',
-                  lineHeight: 1.2,
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                }}
-              >
-                {node.name}
-              </Typography>
-              {node.isCenter && (
-                <Box sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontSize: '0.6rem', opacity: 0.8 }}>
-                    🎯 Main Concept
-                  </Typography>
+          <Controls />
+          <MiniMap />
+          <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+          <Panel position="top-left">
+            <Box sx={{ bgcolor: 'rgba(255,255,255,0.9)', p: 2, borderRadius: 2, boxShadow: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>Legend</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#10b981', border: '2px solid #10b981' }} />
+                  <Typography variant="caption">Beginner</Typography>
                 </Box>
-              )}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#3b82f6', border: '2px solid #3b82f6' }} />
+                  <Typography variant="caption">Intermediate</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#f59e0b', border: '2px solid #f59e0b' }} />
+                  <Typography variant="caption">Advanced</Typography>
+                </Box>
+              </Box>
             </Box>
-          </NeuralNode>
-        ))}
-
-        {/* Legend */}
-        <Box sx={{ position: 'absolute', bottom: 20, left: 20, bgcolor: 'rgba(255,255,255,0.9)', p: 2, borderRadius: 2, boxShadow: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>Legend</Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#10b981', border: '2px solid #10b981' }} />
-              <Typography variant="caption">Beginner</Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#3b82f6', border: '2px solid #3b82f6' }} />
-              <Typography variant="caption">Intermediate</Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#f59e0b', border: '2px solid #f59e0b' }} />
-              <Typography variant="caption">Advanced</Typography>
-            </Box>
-          </Box>
-        </Box>
-      </NeuralCanvas>
+          </Panel>
+        </ReactFlow>
+      </Box>
 
       {sidePanelOpen && selectedConcept && (
         <SidePanel>

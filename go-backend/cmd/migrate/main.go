@@ -10,6 +10,7 @@ import (
 
 func main() {
 	// Initialize logger
+	logger.Initialize()
 	_ = logger.MustGetLogger()
 
 	// Check if data directories exist
@@ -22,7 +23,7 @@ func main() {
 		fn   func() error
 	}{
 		{"Neo4j (CSV)", runCsvToNeo4jMigration},
-		{"Weaviate (Textbook)", runTextbookToWeaviateMigration},
+		{"Weaviate (Textbook)", runPDFToWeaviateMigration},
 	}
 
 	fmt.Println("🚀 Starting data migration...")

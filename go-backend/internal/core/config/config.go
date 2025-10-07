@@ -103,6 +103,13 @@ func buildMongoDBURI() string {
 func LoadConfig() (*Config, error) {
 	// Configuration loaded from environment variables
 
+	weaviateHeaders := make(map[string]string)
+	weaviateHost := getEnvString("WEAVIATE_HOST", "")
+
+	// Add cluster URL header for Weaviate Cloud
+	if weaviateHost != "localhost:8080" && weaviateHost != "localhost" {
+		weaviateHeaders["X-Weaviate-Cluster-Url"] = fmt.Sprintf("https://%s", weaviateHost)
+	}
 	config := &Config{
 		Server: ServerConfig{
 			Environment:  getEnvString("ENVIRONMENT", "development"),
@@ -131,11 +138,11 @@ func LoadConfig() (*Config, error) {
 			Database: getEnvString("NEO4J_DATABASE", "neo4j"),
 		},
 		Weaviate: WeaviateConfig{
-			Host:      getEnvString("WEAVIATE_HOST", "98crrslth6p0jv5wzwiq.c0.asia-southeast1.gcp.weaviate.cloud"),
+			Host:      weaviateHost,
 			Scheme:    getEnvString("WEAVIATE_SCHEME", "https"),
-			APIKey:    getEnvString("WEAVIATE_API_KEY", "bTJHVTdjOUlaT0xRVXJ1QV9OZkJJRFo5T3N0a1VoaGFkeXJqOTZXK25yamZtS1ZUSnBELzFoRGJpaXNvPV92MjAw"),
+			APIKey:    getEnvString("WEAVIATE_API_KEY", ""),
 			ClassName: getEnvString("WEAVIATE_CLASS_NAME", "MathChunk"),
-			Headers:   make(map[string]string),
+			Headers:   weaviateHeaders,
 		},
 		LLM: LLMConfig{
 			Provider:    getEnvString("LLM_PROVIDER", "gemini"),
@@ -165,7 +172,6 @@ func LoadConfig() (*Config, error) {
 
 	return config, nil
 }
-
 
 func validateConfig(cfg *Config) error {
 	if cfg.MongoDB.URI == "" {

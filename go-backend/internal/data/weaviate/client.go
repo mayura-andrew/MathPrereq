@@ -113,7 +113,7 @@ func (c *Client) initSchema(ctx context.Context) error {
 	// Create class schema
 	classObj := &models.Class{
 		Class:      c.class,
-		Vectorizer: "text2vec-openai", 
+		Vectorizer: "text2vec-weaviate",
 		Properties: []*models.Property{
 			{
 				DataType:    []string{"text"},
