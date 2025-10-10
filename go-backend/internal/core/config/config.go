@@ -14,6 +14,7 @@ type Config struct {
 	Weaviate WeaviateConfig `mapstructure:"weaviate"`
 	LLM      LLMConfig      `mapstructure:"llm"`
 	Scraper  ScraperConfig  `mapstructure:"scraper"`
+	Mailer   MailerConfig   `mapstructure:"mailer"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
 }
 
@@ -69,6 +70,16 @@ type ScraperConfig struct {
 	RateLimit     int    `mapstructure:"rate_limit"` // seconds between requests
 	UserAgent     string `mapstructure:"user_agent"`
 	Timeout       int    `mapstructure:"timeout"` // seconds
+}
+
+type MailerConfig struct {
+	Host      string `mapstructure:"host"`
+	Port      int    `mapstructure:"port"`
+	Username  string `mapstructure:"username"`
+	Password  string `mapstructure:"password"`
+	Sender    string `mapstructure:"sender"`
+	AdminMail string `mapstructure:"admin_mail"`
+	Enabled   bool   `mapstructure:"enabled"`
 }
 
 type LoggingConfig struct {
@@ -159,6 +170,15 @@ func LoadConfig() (*Config, error) {
 			UserAgent:     getEnvString("SCRAPER_USER_AGENT", "MathPrereq-Bot/1.0"),
 			Timeout:       getEnvInt("SCRAPER_TIMEOUT", 30),
 		},
+		Mailer: MailerConfig{
+			Host:      getEnvString("MAILER_HOST", "smtp.gmail.com"),
+			Port:      getEnvInt("MAILER_PORT", 587),
+			Username:  getEnvString("MAILER_USERNAME", ""),
+			Password:  getEnvString("MAILER_PASSWORD", ""),
+			Sender:    getEnvString("MAILER_SENDER", "noreply@mathprereq.com"),
+			AdminMail: getEnvString("MAILER_ADMIN_MAIL", "admin@mathprereq.com"),
+			Enabled:   getEnvBool("MAILER_ENABLED", false),
+		},
 		Logging: LoggingConfig{
 			Level:      getEnvString("LOG_LEVEL", "info"),
 			Format:     getEnvString("LOG_FORMAT", "json"),
@@ -234,4 +254,13 @@ func getEnvDuration(key string, defaultValue string) time.Duration {
 		return duration
 	}
 	return 30 * time.Second
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

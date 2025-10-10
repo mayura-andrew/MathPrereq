@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/mathprereq/internal/domain/entities"
 	"github.com/mathprereq/internal/domain/repositories"
 	"github.com/mathprereq/internal/domain/services"
+	"github.com/mathprereq/internal/mailer"
 	"github.com/mathprereq/internal/types"
 	"go.uber.org/zap"
 )
@@ -21,6 +23,8 @@ type queryService struct {
 	stagedConceptRepo repositories.StagedConceptRepository
 	llmClient         LLMClient
 	resourceScraper   *scraper.EducationalWebScraper
+	mailer            *mailer.Mailer
+	adminEmail        string
 	logger            *zap.Logger
 }
 
@@ -57,6 +61,8 @@ func NewQueryService(
 	stagedConceptRepo repositories.StagedConceptRepository,
 	llmClient LLMClient,
 	resourceScraper *scraper.EducationalWebScraper,
+	mailer *mailer.Mailer,
+	adminEmail string,
 	logger *zap.Logger,
 ) services.QueryService {
 	return &queryService{
@@ -66,6 +72,8 @@ func NewQueryService(
 		stagedConceptRepo: stagedConceptRepo,
 		llmClient:         llmClient,
 		resourceScraper:   resourceScraper,
+		mailer:            mailer,
+		adminEmail:        adminEmail,
 		logger:            logger,
 	}
 }
@@ -566,6 +574,73 @@ func (s *queryService) detectAndStageNewConcepts(ctx context.Context, conceptNam
 			zap.String("staged_id", staged.ID),
 			zap.Int("difficulty", analysis.SuggestedDifficulty),
 			zap.Strings("prerequisites", analysis.SuggestedPrereqs))
+
+		// Send email notification asynchronously using goroutine
+		go s.sendNewConceptNotification(staged, query)
+	}
+}
+
+// sendNewConceptNotification sends an email notification for a new staged concept
+func (s *queryService) sendNewConceptNotification(staged *entities.StagedConcept, query *entities.Query) {
+	if s.mailer == nil || !s.mailer.IsEnabled() {
+		s.logger.Debug("Mailer not configured or disabled, skipping email notification")
+		return
+	}
+
+	if s.adminEmail == "" {
+		s.logger.Warn("Admin email not configured, cannot send notification")
+		return
+	}
+
+	s.logger.Info("Sending email notification for new concept",
+		zap.String("concept", staged.ConceptName),
+		zap.String("admin_email", s.adminEmail))
+
+	// Prepare email template data
+	emailData := map[string]interface{}{
+		"ConceptName":         staged.ConceptName,
+		"Description":         staged.Description,
+		"SuggestedDifficulty": staged.SuggestedDifficulty,
+		"SuggestedCategory":   staged.SuggestedCategory,
+		"SuggestedPrereqs":    staged.SuggestedPrerequisites,
+		"Reasoning":           staged.LLMReasoning,
+		"QueryID":             staged.SourceQueryID,
+		"QueryContext":        staged.SourceQueryText,
+		"UserID":              staged.SubmittedBy,
+		"DetectedAt":          staged.IdentifiedAt.Format("2006-01-02 15:04:05 MST"),
+	}
+
+	// Get the absolute path to the template file
+	templatePath := filepath.Join("internal", "mailer", "templates", "new_concept_identified.tmpl")
+
+	// Send email with timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create a channel to handle the result
+	done := make(chan error, 1)
+
+	go func() {
+		err := s.mailer.Send(s.adminEmail, templatePath, emailData)
+		done <- err
+	}()
+
+	// Wait for email to be sent or timeout
+	select {
+	case err := <-done:
+		if err != nil {
+			s.logger.Error("Failed to send new concept notification email",
+				zap.String("concept", staged.ConceptName),
+				zap.Error(err))
+		} else {
+			s.logger.Info("New concept notification email sent successfully",
+				zap.String("concept", staged.ConceptName),
+				zap.String("admin_email", s.adminEmail))
+		}
+	case <-ctx.Done():
+		s.logger.Error("Email notification timed out",
+			zap.String("concept", staged.ConceptName),
+			zap.Error(ctx.Err()))
 	}
 }
 
