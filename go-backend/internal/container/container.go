@@ -16,6 +16,7 @@ import (
 	"github.com/mathprereq/internal/domain/repositories"
 	domainServices "github.com/mathprereq/internal/domain/services"
 	infrastructurerepos "github.com/mathprereq/internal/infrastructure/repositories"
+	"github.com/mathprereq/internal/mailer"
 	"github.com/mathprereq/pkg/logger"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
@@ -53,6 +54,9 @@ type AppContainer struct {
 	// Web scraper
 	resourceScraper *scraper.EducationalWebScraper
 
+	// Mailer
+	mailer *mailer.Mailer
+
 	// Repositories
 	conceptRepo       repositories.ConceptRepository
 	queryRepo         repositories.QueryRepository
@@ -77,6 +81,11 @@ func NewContainer(cfg *config.Config) (Container, error) {
 
 	if err := container.initializeRepositories(); err != nil {
 		return nil, fmt.Errorf("failed to initialize repositories: %w", err)
+	}
+
+	// Initialize mailer
+	if err := container.initializeMailer(); err != nil {
+		return nil, fmt.Errorf("failed to initialize mailer: %w", err)
 	}
 
 	if err := container.initializeServices(); err != nil {
@@ -213,6 +222,32 @@ func (c *AppContainer) initializeRepositories() error {
 	return nil
 }
 
+func (c *AppContainer) initializeMailer() error {
+	c.logger.Info("Initializing mailer",
+		zap.String("host", c.config.Mailer.Host),
+		zap.Int("port", c.config.Mailer.Port),
+		zap.Bool("enabled", c.config.Mailer.Enabled))
+
+	c.mailer = mailer.New(
+		c.config.Mailer.Host,
+		c.config.Mailer.Port,
+		c.config.Mailer.Username,
+		c.config.Mailer.Password,
+		c.config.Mailer.Sender,
+		c.config.Mailer.Enabled,
+	)
+
+	if c.config.Mailer.Enabled {
+		c.logger.Info("Mailer initialized and enabled",
+			zap.String("sender", c.config.Mailer.Sender),
+			zap.String("admin_email", c.config.Mailer.AdminMail))
+	} else {
+		c.logger.Info("Mailer initialized but disabled")
+	}
+
+	return nil
+}
+
 func (c *AppContainer) initializeServices() error {
 	c.logger.Info("Initializing services")
 
@@ -226,7 +261,9 @@ func (c *AppContainer) initializeServices() error {
 		c.vectorRepo,
 		c.stagedConceptRepo,
 		llmAdapter,
-		nil, // scraper will be set after initialization
+		nil,                       // scraper will be set after initialization
+		c.mailer,                  // mailer
+		c.config.Mailer.AdminMail, // admin email
 		c.logger,
 	)
 
@@ -287,6 +324,8 @@ func (c *AppContainer) updateQueryServiceWithScraper() error {
 		c.stagedConceptRepo,
 		llmAdapter,
 		c.resourceScraper,
+		c.mailer,
+		c.config.Mailer.AdminMail,
 		c.logger,
 	)
 
