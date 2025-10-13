@@ -1290,6 +1290,11 @@ func (s *EducationalWebScraper) filterQualityResources(resources []EducationalRe
 	return filtered
 }
 
+// FetchYouTubeTranscript fetches transcript for a YouTube video (public method)
+func (s *EducationalWebScraper) FetchYouTubeTranscript(ctx context.Context, videoID string) (string, error) {
+	return s.fetchYouTubeTranscript(ctx, videoID)
+}
+
 // Utility functions
 
 // makeAbsoluteURL makes a relative URL absolute
