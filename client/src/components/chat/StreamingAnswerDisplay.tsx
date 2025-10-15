@@ -8,11 +8,16 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import Button from '@mui/material/Button';
-import { RiSaveLine, RiRefreshLine, RiStopCircleLine } from 'react-icons/ri';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import { useState } from 'react';
+import { RiSaveLine, RiRefreshLine, RiStopCircleLine, RiArticleLine, RiNodeTree, RiVideoLine } from 'react-icons/ri';
 import type { Message, QueryResponse } from '../../types/api';
 import type { StreamState } from '../../types/streaming';
 import TextualExplanation from '../TextualExplanation.component';
 import StreamProgress from './StreamProgress';
+import StreamingKnowledgeMap from '../StreamingKnowledgeMap.component';
+import StreamingLearningResources from '../StreamingLearningResources.component';
 
 interface StreamingAnswerDisplayProps {
   userMessage: Message;
@@ -35,6 +40,7 @@ export default function StreamingAnswerDisplay({
 }: StreamingAnswerDisplayProps) {
   const response = typeof botMessage.text === 'object' ? botMessage.text as QueryResponse : null;
   const isStreaming = streamState.isStreaming || response?.is_streaming;
+  const [activeTab, setActiveTab] = useState(0);
 
   // Debug logging
   console.log('🎨 StreamingAnswerDisplay render:', {
@@ -47,6 +53,9 @@ export default function StreamingAnswerDisplay({
     streamStateIsStreaming: streamState.isStreaming,
     responseIsStreaming: response?.is_streaming,
   });
+
+  // Extract target concept from user question
+  const targetConcept = streamState.concepts?.[0] || userMessage.text as string;
 
   return (
     <Box
@@ -107,6 +116,33 @@ export default function StreamingAnswerDisplay({
         </Box>
       </Box>
 
+      {/* Tabs for switching between Explanation, Knowledge Map, and Learning Resources */}
+      <Paper sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, newValue) => setActiveTab(newValue)}
+          aria-label="answer view tabs"
+        >
+          <Tab 
+            icon={<RiArticleLine />} 
+            iconPosition="start" 
+            label="Explanation" 
+          />
+          <Tab 
+            icon={<RiNodeTree />} 
+            iconPosition="start" 
+            label="Knowledge Map" 
+            disabled={!streamState.prerequisites || streamState.prerequisites.length === 0}
+          />
+          <Tab 
+            icon={<RiVideoLine />} 
+            iconPosition="start" 
+            label="Learning Resources" 
+            disabled={!streamState.resources || streamState.resources.length === 0}
+          />
+        </Tabs>
+      </Paper>
+
       {/* Content */}
       <Paper
         sx={{
@@ -150,10 +186,28 @@ export default function StreamingAnswerDisplay({
         {/* Streaming Progress */}
         {isStreaming && <StreamProgress streamState={streamState} />}
 
-        {/* Response Content */}
-        {response && (
+        {/* Tab Content */}
+        {activeTab === 0 ? (
+          // Explanation Tab
+          <>
+            {response && (
+              <Box sx={{ flex: 1, minHeight: 0 }}>
+                <TextualExplanation response={response} />
+              </Box>
+            )}
+          </>
+        ) : activeTab === 1 ? (
+          // Knowledge Map Tab
           <Box sx={{ flex: 1, minHeight: 0 }}>
-            <TextualExplanation response={response} />
+            <StreamingKnowledgeMap 
+              streamState={streamState} 
+              targetConcept={targetConcept}
+            />
+          </Box>
+        ) : (
+          // Learning Resources Tab
+          <Box sx={{ flex: 1, minHeight: 0 }}>
+            <StreamingLearningResources streamState={streamState} />
           </Box>
         )}
         

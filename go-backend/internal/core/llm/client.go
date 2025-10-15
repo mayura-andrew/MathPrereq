@@ -26,7 +26,7 @@ type Client struct {
 
 // Default configuration constants
 const (
-	DefaultModel      = "gemini-2.0-flash-exp"
+	DefaultModel      = "gemini-2.5-pro"
 	DefaultMaxTokens  = 4000
 	DefaultTimeout    = 60 * time.Second
 	HealthCheckPrompt = "Respond with 'OK' to confirm you are working."
