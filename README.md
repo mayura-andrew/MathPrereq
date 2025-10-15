@@ -187,6 +187,47 @@ research/
 - **Textbook Content**: `backend/data/raw/calculus_textbook.txt`
 - **Vector Store**: Auto-generated ChromaDB embeddings
 
+## 🚀 Deployment
+
+### Production Deployment on Alibaba Cloud
+
+For detailed deployment instructions, see [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+**Quick Deploy:**
+
+```bash
+# SSH into your Alibaba Cloud ECS instance
+ssh ubuntu@your-ecs-ip
+
+# Clone and deploy
+git clone <repository-url> /opt/mathprereq
+cd /opt/mathprereq
+cp .env.production.example .env
+# Edit .env with your credentials
+nano .env
+
+# Run deployment
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh production
+```
+
+**Services:**
+- Frontend: `http://your-domain.com`
+- Backend API: `http://your-domain.com/api`
+- Neo4j Browser: `http://your-ip:7474`
+
+**Monitoring:**
+```bash
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Check service health
+docker-compose -f docker-compose.prod.yml ps
+
+# Monitor resources
+docker stats
+```
+
 ## 🧪 Testing
 
 ```bash
@@ -230,6 +271,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Sensitive files are excluded via `.gitignore`
 - No user data is logged or stored permanently
 - Rate limiting and retry logic prevent API abuse
+- Production deployment uses Docker security best practices
+- Nginx reverse proxy with SSL/TLS encryption
+- Security group configuration for Alibaba Cloud
 
 ## 🔮 Future Enhancements
 
