@@ -1,9 +1,0 @@
-node_id,concept_name,description
-func_basics,Basic Functions,Understanding of function notation domain and range
-limits,Limits,The concept of approaching a value infinitely close
-continuity,Continuity,Functions without breaks jumps or holes
-derivatives,Derivatives,Rate of change and slope of tangent lines
-chain_rule,Chain Rule,Derivative of composite functions
-integration,Integration,Finding antiderivatives and area under curves
-substitution,U-Substitution,Integration technique using substitution
-parts,Integration by Parts,Integration technique for products of functions

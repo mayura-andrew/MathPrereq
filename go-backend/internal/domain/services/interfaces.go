@@ -12,6 +12,7 @@ import (
 
 type QueryService interface {
 	ProcessQuery(ctx context.Context, req *QueryRequest) (*QueryResult, error)
+	ProcessQueryStream(ctx context.Context, req *QueryRequest, eventChan chan<- entities.StreamEvent) error
 	GetConceptDetail(ctx context.Context, conceptID string) (*types.ConceptDetailResult, error)
 	GetAllConcepts(ctx context.Context) ([]types.Concept, error)
 	GetQueryStats(ctx context.Context) (*repositories.QueryStats, error)

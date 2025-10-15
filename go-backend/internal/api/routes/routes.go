@@ -48,6 +48,11 @@ func SetupRoutes(
 			middleware.Timeout(45*time.Second),
 			handler.ProcessQuery)
 
+		// Streaming query processing (Server-Sent Events)
+		v1.POST("/query/stream",
+			middleware.Timeout(60*time.Second),
+			handler.StreamQuery)
+
 		// Concept operations
 		v1.POST("/concept-detail",
 			middleware.Timeout(15*time.Second),

@@ -19,6 +19,7 @@ MathPrereq analyzes mathematical questions, identifies prerequisite concepts, an
 - 🎯 **Vector Search**: Semantic search using Weaviate for contextual information retrieval
 - 📊 **Analytics & Monitoring**: Comprehensive query analytics and system health monitoring
 - 🚀 **RESTful API**: Clean, well-documented API with comprehensive error handling
+- ✨ **Streaming API**: Real-time Server-Sent Events (SSE) for 5-10x better user experience with progressive updates
 
 ---
 

@@ -28,8 +28,8 @@ export interface Concept {
   difficulty_level?: DifficultyLevel;
   subject_area?: string;
   tags?: string[];
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
   metadata?: {
     prerequisites_count?: number;
     leads_to_count?: number;
@@ -97,6 +97,7 @@ export interface QueryResponse extends APIResponse {
   tokens_used?: number;
   confidence_score?: number;
   error_message?: string;
+  is_streaming?: boolean; // Flag to indicate streaming in progress
 }
 
 export interface SmartConceptQueryResponse extends APIResponse {

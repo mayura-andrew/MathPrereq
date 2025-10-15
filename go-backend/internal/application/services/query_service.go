@@ -1133,3 +1133,341 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// ============================================================================
+// STREAMING QUERY PROCESSING
+// ============================================================================
+
+// ProcessQueryStream processes a query with real-time streaming updates
+// This provides progressive feedback to the user as each step completes
+func (s *queryService) ProcessQueryStream(ctx context.Context, req *services.QueryRequest, eventChan chan<- entities.StreamEvent) error {
+	defer close(eventChan)
+
+	startTime := time.Now()
+	query := entities.NewQuery(req.UserID, req.Question, "")
+
+	// Send start event
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeStart,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamStartData{
+			QueryID:   query.ID,
+			Question:  req.Question,
+			UserID:    req.UserID,
+			Timestamp: startTime,
+		},
+	}
+
+	// Send progress update
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeProgress,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamProgressData{
+			Stage:       "Analyzing question",
+			Percentage:  10,
+			Message:     "Identifying mathematical concepts...",
+			CurrentStep: 1,
+			TotalSteps:  5,
+		},
+	}
+
+	// Step 1: Identify concepts
+	conceptNames, err := s.llmClient.IdentifyConcepts(ctx, query.Text)
+	if err != nil {
+		eventChan <- entities.StreamEvent{
+			Type:      entities.EventTypeError,
+			Timestamp: time.Now(),
+			QueryID:   query.ID,
+			Data: entities.StreamErrorData{
+				Error:   err.Error(),
+				Message: "Failed to identify concepts",
+			},
+		}
+		return fmt.Errorf("concept identification failed: %w", err)
+	}
+
+	query.IdentifiedConcepts = conceptNames
+
+	// Send concepts event
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeConcepts,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamConceptsData{
+			Concepts: conceptNames,
+			Count:    len(conceptNames),
+		},
+	}
+
+	// Send progress update
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeProgress,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamProgressData{
+			Stage:       "Gathering learning resources",
+			Percentage:  30,
+			Message:     fmt.Sprintf("Found %d concepts, fetching prerequisites and context...", len(conceptNames)),
+			CurrentStep: 2,
+			TotalSteps:  5,
+		},
+	}
+
+	// Step 2: Parallel fetch with streaming updates
+	fetchResult := s.parallelDataFetchWithStreaming(ctx, conceptNames, query.Text, query, eventChan)
+
+	query.PrerequisitePath = fetchResult.Prerequisites
+
+	// Send progress update
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeProgress,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamProgressData{
+			Stage:       "Generating explanation",
+			Percentage:  60,
+			Message:     "Creating comprehensive explanation...",
+			CurrentStep: 4,
+			TotalSteps:  5,
+		},
+	}
+
+	// Step 3: Generate explanation with streaming chunks
+	explanation, err := s.generateExplanationWithStreaming(ctx, query, fetchResult, eventChan)
+	if err != nil {
+		eventChan <- entities.StreamEvent{
+			Type:      entities.EventTypeError,
+			Timestamp: time.Now(),
+			QueryID:   query.ID,
+			Data: entities.StreamErrorData{
+				Error:   err.Error(),
+				Message: "Failed to generate explanation",
+			},
+		}
+		return fmt.Errorf("explanation generation failed: %w", err)
+	}
+
+	query.Response = entities.QueryResponse{
+		Explanation:      explanation,
+		RetrievedContext: fetchResult.VectorChunks,
+		LLMProvider:      s.llmClient.Provider(),
+		LLMModel:         s.llmClient.Model(),
+	}
+
+	// Send complete event
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeComplete,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamCompleteData{
+			QueryID:        query.ID,
+			ProcessingTime: time.Since(startTime),
+			TotalConcepts:  len(conceptNames),
+			TotalChunks:    len(fetchResult.VectorChunks),
+			Success:        true,
+		},
+	}
+
+	// Save query asynchronously
+	s.saveQueryAsync(ctx, query)
+
+	// Background tasks
+	go s.detectAndStageNewConcepts(context.Background(), conceptNames, query)
+
+	return nil
+}
+
+// parallelDataFetchWithStreaming fetches data in parallel and sends streaming updates
+func (s *queryService) parallelDataFetchWithStreaming(
+	ctx context.Context,
+	conceptNames []string,
+	queryText string,
+	query *entities.Query,
+	eventChan chan<- entities.StreamEvent,
+) ParallelFetchResult {
+	prereqChan := make(chan []types.Concept, 1)
+	vectorChan := make(chan []string, 1)
+	resourceChan := make(chan []scraper.EducationalResource, 1)
+	errorChan := make(chan error, 3)
+	timingChan := make(chan struct {
+		source   string
+		duration time.Duration
+	}, 3)
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Track timing for each operation
+	timings := make(map[string]time.Duration)
+	startTime := time.Now()
+
+	// Launch parallel fetches
+	go s.fetchPrerequisites(fetchCtx, conceptNames, query, prereqChan, errorChan, timingChan)
+	go s.fetchVectorContext(fetchCtx, queryText, query, vectorChan, errorChan, timingChan)
+	go s.fetchResources(fetchCtx, conceptNames, resourceChan, errorChan, timingChan)
+
+	result := ParallelFetchResult{
+		Prerequisites: []types.Concept{},
+		VectorChunks:  []string{},
+		Resources:     []scraper.EducationalResource{},
+		Errors:        []error{},
+		Timings:       timings,
+	}
+
+	// Collect results and send streaming updates
+	completed := 0
+	timingsReceived := 0
+	for completed < 3 || timingsReceived < 3 {
+		select {
+		case prereqs := <-prereqChan:
+			result.Prerequisites = prereqs
+
+			// Convert to ConceptInfo for streaming
+			conceptInfos := make([]entities.ConceptInfo, len(prereqs))
+			for i, p := range prereqs {
+				conceptInfos[i] = entities.ConceptInfo{
+					ID:          p.ID,
+					Name:        p.Name,
+					Description: p.Description,
+				}
+			}
+
+			eventChan <- entities.StreamEvent{
+				Type:      entities.EventTypePrerequisites,
+				Timestamp: time.Now(),
+				QueryID:   query.ID,
+				Data: entities.StreamPrerequisitesData{
+					Prerequisites: conceptInfos,
+					Count:         len(conceptInfos),
+				},
+			}
+			completed++
+
+		case vectors := <-vectorChan:
+			result.VectorChunks = vectors
+
+			eventChan <- entities.StreamEvent{
+				Type:      entities.EventTypeContext,
+				Timestamp: time.Now(),
+				QueryID:   query.ID,
+				Data: entities.StreamContextData{
+					Chunks: vectors,
+					Count:  len(vectors),
+				},
+			}
+			completed++
+
+		case resources := <-resourceChan:
+			result.Resources = resources
+
+			// Convert to ResourceInfo for streaming
+			resourceInfos := make([]entities.ResourceInfo, 0, len(resources))
+			for _, r := range resources {
+				resourceInfos = append(resourceInfos, entities.ResourceInfo{
+					Title:       r.Title,
+					URL:         r.URL,
+					Type:        "web", // Default type
+					Description: r.Description,
+				})
+			}
+
+			eventChan <- entities.StreamEvent{
+				Type:      entities.EventTypeResources,
+				Timestamp: time.Now(),
+				QueryID:   query.ID,
+				Data: entities.StreamResourcesData{
+					Resources: resourceInfos,
+					Count:     len(resourceInfos),
+				},
+			}
+			completed++
+
+		case timing := <-timingChan:
+			timings[timing.source] = timing.duration
+			timingsReceived++
+
+		case err := <-errorChan:
+			if err != nil {
+				result.Errors = append(result.Errors, err)
+			}
+
+		case <-fetchCtx.Done():
+			if completed < 3 {
+				result.Errors = append(result.Errors, fmt.Errorf("parallel fetch timeout after %v", time.Since(startTime)))
+				s.logger.Warn("Parallel fetch timed out in streaming mode",
+					zap.Int("completed", completed),
+					zap.Duration("elapsed", time.Since(startTime)))
+			}
+			return result
+		}
+	}
+
+	s.logger.Info("Parallel data fetch completed in streaming mode",
+		zap.Int("prerequisites", len(result.Prerequisites)),
+		zap.Int("vector_chunks", len(result.VectorChunks)),
+		zap.Int("resources", len(result.Resources)),
+		zap.Int("errors", len(result.Errors)),
+		zap.Duration("total_duration", time.Since(startTime)),
+		zap.Any("individual_timings", timings))
+
+	return result
+}
+
+// generateExplanationWithStreaming generates explanation and streams chunks
+func (s *queryService) generateExplanationWithStreaming(
+	ctx context.Context,
+	query *entities.Query,
+	fetchResult ParallelFetchResult,
+	eventChan chan<- entities.StreamEvent,
+) (string, error) {
+	// For now, generate the full explanation
+	// TODO: Implement actual streaming from LLM when available
+	explanation, err := s.llmClient.GenerateExplanation(ctx, ExplanationRequest{
+		Query:            query.Text,
+		PrerequisitePath: fetchResult.Prerequisites,
+		ContextChunks:    fetchResult.VectorChunks,
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	// Simulate streaming by chunking the explanation
+	// In production, this would come from the LLM streaming API
+	chunkSize := 100
+	for i := 0; i < len(explanation); i += chunkSize {
+		end := i + chunkSize
+		if end > len(explanation) {
+			end = len(explanation)
+		}
+
+		chunk := explanation[i:end]
+		eventChan <- entities.StreamEvent{
+			Type:      entities.EventTypeExplanationChunk,
+			Timestamp: time.Now(),
+			QueryID:   query.ID,
+			Data: entities.StreamExplanationChunkData{
+				Chunk:      chunk,
+				TotalChars: end,
+			},
+		}
+
+		// Small delay to simulate streaming
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Send completion event
+	eventChan <- entities.StreamEvent{
+		Type:      entities.EventTypeExplanationComplete,
+		Timestamp: time.Now(),
+		QueryID:   query.ID,
+		Data: entities.StreamExplanationCompleteData{
+			FullExplanation: explanation,
+			TotalLength:     len(explanation),
+		},
+	}
+
+	return explanation, nil
+}
