@@ -3,10 +3,12 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mathprereq/internal/core/config"
 	"github.com/mathprereq/pkg/logger"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	neo4jConfig "github.com/neo4j/neo4j-go-driver/v6/neo4j/config"
 	"go.uber.org/zap"
 )
 
@@ -36,21 +38,38 @@ type ConceptDetailResult struct {
 func NewClient(cfg config.Neo4jConfig) (*Client, error) {
 	logger := logger.MustGetLogger()
 
-	driver, err := neo4j.NewDriver(
+	// Configure driver with proper timeouts and connection pooling
+	driver, err := neo4j.NewDriverWithContext(
 		cfg.URI,
 		neo4j.BasicAuth(cfg.Username, cfg.Password, ""),
+		func(c *neo4jConfig.Config) {
+			// Connection pool settings
+			c.MaxConnectionPoolSize = 50
+			c.MaxConnectionLifetime = 1 * time.Hour
+			c.ConnectionAcquisitionTimeout = 5 * time.Second
+
+			// Socket connect timeout
+			c.SocketConnectTimeout = 5 * time.Second
+			c.SocketKeepalive = true
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Neo4j driver: %w", err)
 	}
 
-	// verify connectivity
-	ctx := context.Background()
+	// Verify connectivity with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	if err := driver.VerifyConnectivity(ctx); err != nil {
+		driver.Close(ctx)
 		return nil, fmt.Errorf("failed to verify Neo4j connectivity: %w", err)
 	}
 
-	logger.Info("Connected to Neo4j", zap.String("uri", cfg.URI))
+	logger.Info("Connected to Neo4j",
+		zap.String("uri", cfg.URI),
+		zap.Int("max_pool_size", 50),
+		zap.Duration("connection_timeout", 5*time.Second))
 
 	return &Client{
 		driver: driver,
@@ -145,42 +164,74 @@ func (c *Client) FindPrerequisitePath(ctx context.Context, targetConcepts []stri
 		return []Concept{}, nil
 	}
 
-	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
+	// Add timeout protection for Neo4j operations
+	queryStart := time.Now()
+	defer func() {
+		c.logger.Debug("FindPrerequisitePath completed",
+			zap.Duration("total_duration", time.Since(queryStart)),
+			zap.Int("concept_count", len(targetConcepts)))
+	}()
 
-	var targetIDs []string
-	for _, concept := range targetConcepts {
-		id, err := c.FindConceptID(ctx, concept)
-		if err != nil {
-			c.logger.Warn("Failed to find concept", zap.String("concept", concept), zap.Error(err))
-			continue
-		}
-		if id != nil {
-			targetIDs = append(targetIDs, *id)
-		}
+	// Create session with context timeout protection
+	sessionCtx, sessionCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer sessionCancel()
+
+	session := c.driver.NewSession(sessionCtx, neo4j.SessionConfig{
+		AccessMode: neo4j.AccessModeRead,
+	})
+	defer session.Close(sessionCtx)
+
+	// OPTIMIZED: Batch lookup all concept IDs in a single query instead of sequential lookups
+	lookupStart := time.Now()
+	targetIDs, err := c.findConceptIDsBatch(sessionCtx, session, targetConcepts)
+	lookupDuration := time.Since(lookupStart)
+
+	if err != nil {
+		c.logger.Error("Failed to find concept IDs in batch",
+			zap.Strings("concepts", targetConcepts),
+			zap.Duration("duration", lookupDuration),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to find concept IDs: %w", err)
 	}
 
 	if len(targetIDs) == 0 {
-		c.logger.Warn("No target concepts found in knowledge graph")
+		c.logger.Warn("No target concepts found in knowledge graph",
+			zap.Strings("attempted_concepts", targetConcepts),
+			zap.Duration("lookup_duration", lookupDuration))
 		return []Concept{}, nil
 	}
 
+	c.logger.Debug("Found concept IDs",
+		zap.Int("requested", len(targetConcepts)),
+		zap.Int("found", len(targetIDs)),
+		zap.Duration("lookup_duration", lookupDuration))
+
+	// Optimized query with depth limit and better structure
+	// Limits path length to 1-5 hops to prevent expensive full graph traversal
 	query := `
-		MATCH path = (prerequisite:Concept)-[:PREREQUISITE_FOR*]->(target:Concept)
-		WHERE target.id IN $targetIDs
-		WITH prerequisite, target, length(path) as pathLength
-		ORDER BY pathLength
+		CALL {
+			MATCH (target:Concept)
+			WHERE target.id IN $targetIDs
+			RETURN target
+		}
+		CALL {
+			WITH target
+			MATCH path = (prerequisite:Concept)-[:PREREQUISITE_FOR*1..5]->(target)
+			RETURN DISTINCT prerequisite
+			LIMIT 100
+		}
 		WITH COLLECT(DISTINCT prerequisite) as prerequisites, COLLECT(DISTINCT target) as targets
 		UNWIND (prerequisites + targets) as concept
-		RETURN DISTINCT concept.id as id, concept.name as name, 
+		RETURN DISTINCT concept.id as id, 
+		       concept.name as name, 
 		       concept.description as description,
 		       CASE WHEN concept.id IN $targetIDs THEN 'target' ELSE 'prerequisite' END as type
-		ORDER BY 
-		  CASE WHEN concept.id IN $targetIDs THEN 1 ELSE 0 END,
-		  concept.name
+		ORDER BY type, concept.name
 	`
-	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		records, err := tx.Run(ctx, query, map[string]interface{}{
+
+	pathStart := time.Now()
+	result, err := session.ExecuteRead(sessionCtx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		records, err := tx.Run(sessionCtx, query, map[string]interface{}{
 			"targetIDs": targetIDs,
 		})
 		if err != nil {
@@ -188,7 +239,7 @@ func (c *Client) FindPrerequisitePath(ctx context.Context, targetConcepts []stri
 		}
 
 		var concepts []Concept
-		for records.Next(ctx) {
+		for records.Next(sessionCtx) {
 			record := records.Record()
 
 			id, _ := record.Get("id")
@@ -208,10 +259,15 @@ func (c *Client) FindPrerequisitePath(ctx context.Context, targetConcepts []stri
 	})
 
 	if err != nil {
+		c.logger.Error("Failed to find prerequisite path",
+			zap.Duration("path_query_duration", time.Since(pathStart)),
+			zap.Error(err))
 		return nil, fmt.Errorf("failed to find prerequisite path: %w", err)
 	}
 	concepts := result.([]Concept)
-	c.logger.Info("Found learning path", zap.Int("concepts", len(concepts)))
+	c.logger.Info("Found learning path",
+		zap.Int("concepts", len(concepts)),
+		zap.Duration("path_query_duration", time.Since(pathStart)))
 
 	return concepts, nil
 }
@@ -408,6 +464,60 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, params map[stri
 	}
 
 	return result.([]map[string]interface{}), nil
+}
+
+// findConceptIDsBatch performs a batch lookup of concept IDs for multiple concept names
+// This is much more efficient than sequential FindConceptID calls
+func (c *Client) findConceptIDsBatch(ctx context.Context, session neo4j.SessionWithContext, conceptNames []string) ([]string, error) {
+	query := `
+		UNWIND $conceptNames AS conceptName
+		MATCH (c:Concept)
+		WHERE toLower(c.name) CONTAINS toLower(conceptName) 
+		   OR toLower(c.id) = toLower(conceptName)
+		RETURN DISTINCT c.id as id, c.name as name
+	`
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		records, err := tx.Run(ctx, query, map[string]interface{}{
+			"conceptNames": conceptNames,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		var ids []string
+		matchedConcepts := make(map[string]string) // id -> name mapping for logging
+
+		for records.Next(ctx) {
+			record := records.Record()
+			if idValue, ok := record.Get("id"); ok && idValue != nil {
+				id := toString(idValue)
+				ids = append(ids, id)
+
+				if nameValue, ok := record.Get("name"); ok && nameValue != nil {
+					matchedConcepts[id] = toString(nameValue)
+				}
+			}
+		}
+
+		if err := records.Err(); err != nil {
+			return nil, err
+		}
+
+		// Log matched concepts for debugging
+		c.logger.Debug("Batch concept lookup results",
+			zap.Int("requested", len(conceptNames)),
+			zap.Int("matched", len(ids)),
+			zap.Any("matches", matchedConcepts))
+
+		return ids, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result.([]string), nil
 }
 
 func toString(value interface{}) string {

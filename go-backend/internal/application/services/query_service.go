@@ -38,6 +38,15 @@ type NewConceptAnalysis struct {
 	IsLikelyNewConcept  bool     `json:"is_likely_new_concept"`
 }
 
+// ParallelFetchResult holds results from parallel data fetching
+type ParallelFetchResult struct {
+	Prerequisites []types.Concept
+	VectorChunks  []string
+	Resources     []scraper.EducationalResource
+	Errors        []error
+	Timings       map[string]time.Duration // Track individual fetch times
+}
+
 // LLMClient interface for the service layer
 type LLMClient interface {
 	IdentifyConcepts(ctx context.Context, query string) ([]string, error)
@@ -114,7 +123,7 @@ func (s *queryService) ProcessQuery(ctx context.Context, req *services.QueryRequ
 func (s *queryService) processQueryPipeline(ctx context.Context, query *entities.Query) (*services.QueryResult, error) {
 	var result = &services.QueryResult{Query: query}
 
-	// Step 1: Extract concepts
+	// Step 1: Extract concepts (sequential - needed for next steps)
 	stepStart := time.Now()
 	conceptNames, err := s.llmClient.IdentifyConcepts(ctx, query.Text)
 	query.AddProcessingStep("identify_concepts", time.Since(stepStart), err == nil, err)
@@ -125,47 +134,31 @@ func (s *queryService) processQueryPipeline(ctx context.Context, query *entities
 	query.IdentifiedConcepts = conceptNames
 	result.IdentifiedConcepts = conceptNames
 
-	// Step : Check for new concepts not in the knowledge graph (non-blocking)
-	// Use a background context so this can complete even if the request is cancelled
-	go s.detectAndStageNewConcepts(context.Background(), conceptNames, query)
+	// Step 2: Parallel data fetching from multiple sources using channels
+	s.logger.Info("Starting parallel data fetch",
+		zap.Strings("concepts", conceptNames),
+		zap.String("query_id", query.ID))
 
-	// Step 2: Find prerequisite path
-	stepStart = time.Now()
-	prereqPath, err := s.conceptRepo.FindPrerequisitePath(ctx, conceptNames)
-	query.AddProcessingStep("find_prerequisites", time.Since(stepStart), err == nil, err)
-	if err != nil {
-		return nil, fmt.Errorf("prerequisite path finding failed: %w", err)
+	fetchResult := s.parallelDataFetch(ctx, conceptNames, query.Text, query)
+
+	// Log any non-critical errors but continue processing
+	if len(fetchResult.Errors) > 0 {
+		for _, fetchErr := range fetchResult.Errors {
+			s.logger.Warn("Non-critical fetch error", zap.Error(fetchErr))
+		}
 	}
 
-	query.PrerequisitePath = prereqPath
-	result.PrerequisitePath = prereqPath
+	// Use fetched data
+	query.PrerequisitePath = fetchResult.Prerequisites
+	result.PrerequisitePath = fetchResult.Prerequisites
+	result.RetrievedContext = fetchResult.VectorChunks
 
-	// Step 3: Start background resource scraping for concepts (non-blocking)
-	if s.resourceScraper != nil && len(conceptNames) > 0 {
-		go s.scrapeResourcesAsync(ctx, conceptNames, query.ID)
-	}
-
-	// Step 4: Vector search
-	stepStart = time.Now()
-	vectorResults, err := s.vectorRepo.Search(ctx, query.Text, 5)
-	query.AddProcessingStep("vector_search", time.Since(stepStart), err == nil, err)
-	if err != nil {
-		s.logger.Warn("Vector search failed", zap.Error(err))
-		vectorResults = []types.VectorResult{}
-	}
-
-	context := make([]string, len(vectorResults))
-	for i, vr := range vectorResults {
-		context[i] = vr.Content
-	}
-	result.RetrievedContext = context
-
-	// Step 4: Generate explanation
+	// Step 3: Generate explanation with all gathered context
 	stepStart = time.Now()
 	explanation, err := s.llmClient.GenerateExplanation(ctx, ExplanationRequest{
 		Query:            query.Text,
-		PrerequisitePath: prereqPath,
-		ContextChunks:    context,
+		PrerequisitePath: fetchResult.Prerequisites,
+		ContextChunks:    fetchResult.VectorChunks,
 	})
 	query.AddProcessingStep("generate_explanation", time.Since(stepStart), err == nil, err)
 	if err != nil {
@@ -174,11 +167,14 @@ func (s *queryService) processQueryPipeline(ctx context.Context, query *entities
 
 	query.Response = entities.QueryResponse{
 		Explanation:      explanation,
-		RetrievedContext: context,
+		RetrievedContext: fetchResult.VectorChunks,
 		LLMProvider:      s.llmClient.Provider(),
 		LLMModel:         s.llmClient.Model(),
 	}
 	result.Explanation = explanation
+
+	// Background tasks (non-blocking) - these run after response is ready
+	go s.detectAndStageNewConcepts(context.Background(), conceptNames, query)
 
 	return result, nil
 }
@@ -196,6 +192,284 @@ func (s *queryService) saveQueryAsync(ctx context.Context, query *entities.Query
 		}
 	}()
 }
+
+// ============================================================================
+// PARALLEL DATA FETCHING WITH GO CHANNELS
+// ============================================================================
+
+// parallelDataFetch orchestrates concurrent fetching from multiple data sources
+// This significantly improves performance by running Neo4j, Weaviate, and scraper
+// queries in parallel instead of sequentially.
+func (s *queryService) parallelDataFetch(ctx context.Context, conceptNames []string, queryText string, query *entities.Query) ParallelFetchResult {
+	// Create buffered channels for results (buffer size 1 to avoid blocking)
+	prereqChan := make(chan []types.Concept, 1)
+	vectorChan := make(chan []string, 1)
+	resourceChan := make(chan []scraper.EducationalResource, 1)
+	errorChan := make(chan error, 3) // Buffer for up to 3 errors
+
+	// Create context with timeout for all parallel operations
+	// This prevents any single slow operation from blocking the entire pipeline
+	// Increased to 10 seconds to accommodate Neo4j prerequisite path queries which can be complex
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Track timing for each fetch operation
+	timingChan := make(chan struct {
+		source   string
+		duration time.Duration
+	}, 3)
+
+	fetchStart := time.Now()
+
+	// Launch goroutines for parallel fetching
+	// Each runs independently and sends results through channels
+	go s.fetchPrerequisites(fetchCtx, conceptNames, query, prereqChan, errorChan, timingChan)
+	go s.fetchVectorContext(fetchCtx, queryText, query, vectorChan, errorChan, timingChan)
+	go s.fetchResources(fetchCtx, conceptNames, resourceChan, errorChan, timingChan)
+
+	// Collect results with timeout protection
+	result := ParallelFetchResult{
+		Prerequisites: []types.Concept{},
+		VectorChunks:  []string{},
+		Resources:     []scraper.EducationalResource{},
+		Errors:        []error{},
+		Timings:       make(map[string]time.Duration),
+	}
+
+	// Use select to handle results as they arrive (non-blocking)
+	// This allows faster operations to complete while slower ones continue
+	completed := 0
+	timingsReceived := 0
+
+	for completed < 3 || timingsReceived < 3 {
+		select {
+		case prereqs := <-prereqChan:
+			result.Prerequisites = prereqs
+			completed++
+			s.logger.Debug("Prerequisites received",
+				zap.Int("count", len(prereqs)))
+
+		case vectors := <-vectorChan:
+			result.VectorChunks = vectors
+			completed++
+			s.logger.Debug("Vector chunks received",
+				zap.Int("count", len(vectors)))
+
+		case resources := <-resourceChan:
+			result.Resources = resources
+			completed++
+			s.logger.Debug("Resources received",
+				zap.Int("count", len(resources)))
+
+		case timing := <-timingChan:
+			result.Timings[timing.source] = timing.duration
+			timingsReceived++
+
+		case err := <-errorChan:
+			if err != nil {
+				result.Errors = append(result.Errors, err)
+			}
+
+		case <-fetchCtx.Done():
+			// Timeout occurred - log detailed information about what completed and what didn't
+			incomplete := []string{}
+			if completed < 3 {
+				// Check which operations didn't complete
+				select {
+				case <-prereqChan:
+					// Prerequisites completed but not received yet
+				default:
+					incomplete = append(incomplete, "prerequisites")
+				}
+				select {
+				case <-vectorChan:
+					// Vectors completed but not received yet
+				default:
+					incomplete = append(incomplete, "vectors")
+				}
+				select {
+				case <-resourceChan:
+					// Resources completed but not received yet
+				default:
+					incomplete = append(incomplete, "resources")
+				}
+			}
+
+			result.Errors = append(result.Errors, fmt.Errorf("parallel fetch timeout after %v", time.Since(fetchStart)))
+			s.logger.Warn("Parallel fetch timed out",
+				zap.Int("completed", completed),
+				zap.Strings("incomplete_operations", incomplete),
+				zap.Duration("elapsed", time.Since(fetchStart)),
+				zap.Any("completed_timings", result.Timings))
+			return result
+		}
+	}
+
+	totalDuration := time.Since(fetchStart)
+	s.logger.Info("Parallel data fetch completed",
+		zap.Int("prerequisites", len(result.Prerequisites)),
+		zap.Int("vector_chunks", len(result.VectorChunks)),
+		zap.Int("resources", len(result.Resources)),
+		zap.Int("errors", len(result.Errors)),
+		zap.Duration("total_duration", totalDuration),
+		zap.Any("individual_timings", result.Timings))
+
+	return result
+}
+
+// fetchPrerequisites retrieves concept prerequisites from Neo4j in a goroutine
+func (s *queryService) fetchPrerequisites(
+	ctx context.Context,
+	conceptNames []string,
+	query *entities.Query,
+	resultChan chan<- []types.Concept,
+	errorChan chan<- error,
+	timingChan chan<- struct {
+		source   string
+		duration time.Duration
+	},
+) {
+	stepStart := time.Now()
+	defer func() {
+		timingChan <- struct {
+			source   string
+			duration time.Duration
+		}{"neo4j", time.Since(stepStart)}
+	}()
+
+	prereqPath, err := s.conceptRepo.FindPrerequisitePath(ctx, conceptNames)
+
+	// Track this step in the query analytics
+	if query != nil {
+		query.AddProcessingStep("find_prerequisites", time.Since(stepStart), err == nil, err)
+	}
+
+	if err != nil {
+		s.logger.Warn("Failed to fetch prerequisites",
+			zap.Error(err),
+			zap.Duration("duration", time.Since(stepStart)))
+		errorChan <- fmt.Errorf("prerequisite fetch failed: %w", err)
+		resultChan <- []types.Concept{} // Send empty result for graceful degradation
+		return
+	}
+
+	s.logger.Debug("Prerequisites fetched successfully",
+		zap.Duration("duration", time.Since(stepStart)),
+		zap.Int("count", len(prereqPath)))
+
+	resultChan <- prereqPath
+	errorChan <- nil // Signal no error
+}
+
+// fetchVectorContext retrieves semantic context from Weaviate in a goroutine
+func (s *queryService) fetchVectorContext(
+	ctx context.Context,
+	queryText string,
+	query *entities.Query,
+	resultChan chan<- []string,
+	errorChan chan<- error,
+	timingChan chan<- struct {
+		source   string
+		duration time.Duration
+	},
+) {
+	stepStart := time.Now()
+	defer func() {
+		timingChan <- struct {
+			source   string
+			duration time.Duration
+		}{"weaviate", time.Since(stepStart)}
+	}()
+
+	vectorResults, err := s.vectorRepo.Search(ctx, queryText, 5)
+
+	// Track this step in the query analytics
+	if query != nil {
+		query.AddProcessingStep("vector_search", time.Since(stepStart), err == nil, err)
+	}
+
+	if err != nil {
+		s.logger.Warn("Vector search failed",
+			zap.Error(err),
+			zap.Duration("duration", time.Since(stepStart)))
+		errorChan <- fmt.Errorf("vector search failed: %w", err)
+		resultChan <- []string{} // Send empty result for graceful degradation
+		return
+	}
+
+	// Extract content from vector results
+	contextChunks := make([]string, len(vectorResults))
+	for i, vr := range vectorResults {
+		contextChunks[i] = vr.Content
+	}
+
+	s.logger.Debug("Vector context fetched successfully",
+		zap.Duration("duration", time.Since(stepStart)),
+		zap.Int("chunks", len(contextChunks)))
+
+	resultChan <- contextChunks
+	errorChan <- nil // Signal no error
+}
+
+// fetchResources retrieves educational resources from scraper in a goroutine
+func (s *queryService) fetchResources(
+	ctx context.Context,
+	conceptNames []string,
+	resultChan chan<- []scraper.EducationalResource,
+	errorChan chan<- error,
+	timingChan chan<- struct {
+		source   string
+		duration time.Duration
+	},
+) {
+	stepStart := time.Now()
+	defer func() {
+		timingChan <- struct {
+			source   string
+			duration time.Duration
+		}{"scraper", time.Since(stepStart)}
+	}()
+
+	// If scraper is not available, return empty results
+	if s.resourceScraper == nil {
+		s.logger.Debug("Resource scraper not available")
+		resultChan <- []scraper.EducationalResource{}
+		errorChan <- nil
+		return
+	}
+
+	// Limit concepts to avoid excessive resource fetching
+	maxConcepts := 3
+	limitedConcepts := conceptNames
+	if len(conceptNames) > maxConcepts {
+		limitedConcepts = conceptNames[:maxConcepts]
+		s.logger.Debug("Limited resource fetching",
+			zap.Int("original", len(conceptNames)),
+			zap.Int("limited", maxConcepts))
+	}
+
+	// Fetch resources for concepts
+	resources, err := s.GetResourcesForConcepts(ctx, limitedConcepts, 10)
+	if err != nil {
+		s.logger.Warn("Failed to fetch resources",
+			zap.Error(err),
+			zap.Duration("duration", time.Since(stepStart)))
+		errorChan <- fmt.Errorf("resource fetch failed: %w", err)
+		resultChan <- []scraper.EducationalResource{}
+		return
+	}
+
+	s.logger.Debug("Resources fetched successfully",
+		zap.Duration("duration", time.Since(stepStart)),
+		zap.Int("count", len(resources)))
+
+	resultChan <- resources
+	errorChan <- nil // Signal no error
+}
+
+// ============================================================================
+// END PARALLEL DATA FETCHING
+// ============================================================================
 
 // scrapeResourcesAsync scrapes educational resources in the background
 func (s *queryService) scrapeResourcesAsync(ctx context.Context, conceptNames []string, queryID string) {
