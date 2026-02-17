@@ -7,6 +7,8 @@
 
 This repository contains the implementation of a research project that leverages Large Language Models (LLMs) and Knowledge Graphs to automatically identify prerequisite knowledge concepts in foundational mathematics. The system was accepted for presentation at the SLAAI-2025 IEEE Conference.
 
+Publised Paper - https://ieeexplore.ieee.org/document/11318529
+
 ## Architecture
 
 The project consists of two main components:
