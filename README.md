@@ -66,7 +66,7 @@ This work was accepted at the **SLAAI-2025 IEEE Conference**.
 
 **Citation:**
 ```
-[To be updated with final publication details]
+K. M. G. M. B. Alahakoon and D. D. M. Ranasinghe, "LLM and Knowledge Graph Based Framework for Dynamic Prerequisite Knowledge Identification in Foundational Mathematics," 2025 9th SLAAI International Conference on Artificial Intelligence (SLAAI-ICAI), Colombo, Sri Lanka, 2025, pp. 1-6, doi: 10.1109/SLAAI-ICAI68534.2025.11318529. keywords: {Visualization;Accuracy;Large language models;Retrieval augmented generation;Prototypes;Knowledge graphs;Software systems;Vectors;Software reliability;Systematic literature review;Large Language Models;Generative AI;Retrieval Augmented Generation;Software Engineering;Educational Technology},
 ```
 
 ## License
